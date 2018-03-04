@@ -34,7 +34,19 @@ public class SerializeBeanUtils {
         private Method readMethod;
         private Method writeMethod;
         private Method relationWriteMethod;
+        private Method relationReadMethod;
         private SerializeProperty property;
+
+        public Object getValue(Object bean) throws Exception {
+            Object value = readMethod.invoke(bean);
+            if (value == null) {
+                return null;
+            }
+            if (property.relation() == Relation.NONE) {
+                return value;
+            }
+            return relationReadMethod.invoke(value);
+        }
     }
 
     private static Map<Class<?>, SerializeMeta> META_MAP = new HashMap<>();
@@ -97,8 +109,9 @@ public class SerializeBeanUtils {
             sfield.writeMethod = clazz.getMethod("set" + capitalize(fieldName), method.getReturnType());
             sfield.columnName = columnName;
             sfield.property = property;
-            if (property.relation() == Relation.MANY_TO_ONE) {
+            if (property.relation() != Relation.NONE) {
                 sfield.relationWriteMethod = getRelationWriteMethod(method, property, columnName);
+                sfield.relationReadMethod = getRelationReadMethod(method, property, columnName);
             }
             if (field != null && field.getAnnotation(SerializeId.class) != null) {
                 if (idField != null) {
@@ -109,9 +122,6 @@ public class SerializeBeanUtils {
             } else {
                 normalFields.add(sfield);
             }
-        }
-        if (idField == null) {
-            throw new RuntimeException(clazz + " has no id field");
         }
         meta.normalFields = Collections.unmodifiableList(normalFields);
         meta.idField = idField;
@@ -130,9 +140,39 @@ public class SerializeBeanUtils {
         Method method = getIdWriteMethod(relationClass);
         if (method == null) {
             throw new RuntimeException(
-                    readMethod.getClass().getCanonicalName() + "." + columnName + ": could not get id write method");
+                    readMethod.getClass() + "." + columnName + ": could not get relation write method");
         }
         return method;
+    }
+
+    private static Method getRelationReadMethod(Method readMethod, SerializeProperty property, String columnName)
+            throws Exception {
+        Class<?> relationClass = readMethod.getReturnType();
+        if (relationClass.getAnnotation(SerializeBean.class) == null) {
+            String idName = StringUtil.isNotEmpty(property.joinProperty()) ? property.joinProperty() : "id";
+            return relationClass.getMethod("get" + capitalize(idName));
+        }
+        Method method = getIdReadMethod(relationClass);
+        if (method == null) {
+            throw new RuntimeException(
+                    readMethod.getClass() + "." + columnName + ": could not get relation read method");
+        }
+        return method;
+    }
+
+    private static Method getIdReadMethod(Class<?> relationClass) throws Exception {
+        Field[] fields = relationClass.getDeclaredFields();
+        for (Field field : fields) {
+            if (field.getAnnotation(SerializeId.class) != null) {
+                String idName = field.getName();
+                return relationClass.getMethod("get" + capitalize(idName));
+            }
+        }
+        Class<?> superClass = relationClass.getSuperclass();
+        if (superClass == null || superClass == Object.class) {
+            return null;
+        }
+        return getIdReadMethod(superClass);
     }
 
     private static Method getIdWriteMethod(Class<?> relationClass) throws Exception {
@@ -205,44 +245,51 @@ public class SerializeBeanUtils {
             throw new RuntimeException(bean.getClass() + " is not annotated with SerializeBean");
         }
         SerializeDoc sdoc = new SerializeDoc();
-        sdoc.setIdColumns(new String[] { meta.idField.columnName });
-        Object id = meta.idField.readMethod.invoke(bean);
-        boolean update;
-        switch (insertUpdate) {
-        case INSERT:
-            update = false;
-            break;
-        case UPDATE:
-            update = true;
-            break;
-        case RUNTIME:
-            update = id != null;
-            break;
-        default:
-            throw new RuntimeException("Unknown InsertUpdate");
+        Object id = null;
+        boolean update = false;
+        if (meta.idField != null) {
+            sdoc.setIdColumns(new String[] { meta.idField.columnName });
+            id = meta.idField.getValue(bean);
+            switch (insertUpdate) {
+            case INSERT:
+                update = false;
+                break;
+            case UPDATE:
+                update = true;
+                break;
+            case RUNTIME:
+                update = id != null;
+                break;
+            default:
+                throw new RuntimeException("Unknown InsertUpdate");
+            }
         }
         if (update) {
+            if (id == null) {
+                throw new RuntimeException("No id set to update");
+            }
+            sdoc.setIdValues(new Object[] { id });
             if (insertUpdate == InsertUpdate.RUNTIME) {
                 sdoc.setUpsert(meta.idInfo.strategy() == IdGenerator.PROVIDE);
             }
-            sdoc.setIdValues(new Object[] { id });
         } else {
             SerializeId idInfo = meta.idInfo;
-            switch (idInfo.strategy()) {
-            case INCREMENT:
-                sdoc.setIdIncrementClass(idInfo.incrementClass());
-                break;
-            case UUID:
-                id = UUID.randomUUID().toString().replaceAll("-", "");
-                break;
-            case OBJECTID:
-                id = new ObjectId().toHexString();
-                break;
-            case PROVIDE:
-                // TODO
-                break;
-            default:
-                throw new RuntimeException("Unsupported id generator " + idInfo.strategy());
+            if (idInfo != null) {
+                switch (idInfo.strategy()) {
+                case INCREMENT:
+                    sdoc.setIdIncrementClass(idInfo.incrementClass());
+                    break;
+                case UUID:
+                    id = UUID.randomUUID().toString().replaceAll("-", "");
+                    break;
+                case OBJECTID:
+                    id = new ObjectId().toHexString();
+                    break;
+                case PROVIDE:
+                    break;
+                default:
+                    throw new RuntimeException("Unsupported id generator " + idInfo.strategy());
+                }
             }
         }
         Map<String, Object> doc = new HashMap<>();
@@ -256,17 +303,7 @@ public class SerializeBeanUtils {
             } else if (!property.insertable()) {
                 continue;
             }
-            Object value = sfield.readMethod.invoke(bean);
-            if (value != null) {
-                if (property.relation() == Relation.MANY_TO_ONE) {
-                    String joinColumn = property.joinProperty();
-                    if (StringUtil.isEmpty(joinColumn)) {
-                        joinColumn = "id";
-                    }
-                    value = value.getClass().getMethod("get" + capitalize(joinColumn)).invoke(value);
-                }
-            }
-            doc.put(sfield.columnName, value);
+            doc.put(sfield.columnName, sfield.getValue(bean));
         }
         if (!update && id != null) {
             doc.put(sdoc.getIdColumns()[0], id);
@@ -281,7 +318,7 @@ public class SerializeBeanUtils {
             return false;
         }
         Class<?> destClass = sfield.writeMethod.getParameterTypes()[0];
-        if (sfield.property.relation() == Relation.MANY_TO_ONE) {
+        if (sfield.relationWriteMethod != null) {
             Object relationInstance = destClass.newInstance();
             sfield.writeMethod.invoke(object, relationInstance);
             value = Bean.parse(value, sfield.relationWriteMethod.getParameterTypes()[0]);

@@ -1,4 +1,4 @@
-package com.sunnysuperman.repository.db;
+package com.sunnysuperman.repository.db.mapper;
 
 import java.util.Map;
 

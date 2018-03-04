@@ -2,6 +2,7 @@ package com.sunnysuperman.repository.db;
 
 import java.lang.reflect.Array;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedList;
@@ -19,6 +20,7 @@ import com.sunnysuperman.commons.util.JSONUtil;
 import com.sunnysuperman.repository.InsertUpdate;
 import com.sunnysuperman.repository.RepositoryException;
 import com.sunnysuperman.repository.SaveResult;
+import com.sunnysuperman.repository.db.mapper.DBRowMapper;
 import com.sunnysuperman.repository.serialize.SerializeBean;
 import com.sunnysuperman.repository.serialize.SerializeBeanUtils;
 import com.sunnysuperman.repository.serialize.SerializeDoc;
@@ -116,19 +118,19 @@ public abstract class DBRepository {
         return getJdbcTemplate().update(sql, serializeParams(params));
     }
 
-    public boolean insert(String tableName, Map<String, ?> doc, boolean ignore) throws RepositoryException {
+    public boolean insert(String tableName, Map<String, ?> doc, boolean ignore) {
         List<Object> params = new ArrayList<Object>(doc.size());
         String sql = getInsertDialect(doc, tableName, params, ignore);
         return execute(sql, params.toArray(new Object[params.size()])) > 0;
     }
 
-    public boolean insert(String tableName, Map<String, ?> doc) throws RepositoryException {
+    public boolean insert(String tableName, Map<String, ?> doc) {
         return insert(tableName, doc, false);
     }
 
     @SuppressWarnings("unchecked")
-    public <T extends Number> T insert(String tableName, Map<String, ?> doc, boolean ignore, Class<T> generatedKeyClass)
-            throws RepositoryException {
+    public <T extends Number> T insert(String tableName, Map<String, ?> doc, boolean ignore,
+            Class<T> generatedKeyClass) {
         List<Object> params = new ArrayList<Object>(doc.size());
         String sql = getInsertDialect(doc, tableName, params, ignore);
         Object[] paramsArray = serializeParams(params.toArray(new Object[params.size()]));
@@ -152,8 +154,7 @@ public abstract class DBRepository {
         return (T) key;
     }
 
-    public int update(String tableName, Map<String, ?> doc, Object primaryKey, Object primaryValue)
-            throws RepositoryException {
+    public int update(String tableName, Map<String, ?> doc, Object primaryKey, Object primaryValue) {
         StringBuilder buf = new StringBuilder("update ");
         buf.append(tableName);
         buf.append(" set ");
@@ -219,11 +220,11 @@ public abstract class DBRepository {
         return execute(buf.toString(), paramsAsArray);
     }
 
-    public SaveResult save(Object bean) throws RepositoryException {
+    public SaveResult save(Object bean) {
         return save(bean, InsertUpdate.RUNTIME);
     }
 
-    public SaveResult save(Object bean, InsertUpdate insertUpdate) throws RepositoryException {
+    public SaveResult save(Object bean, InsertUpdate insertUpdate) {
         String tableName = bean.getClass().getAnnotation(SerializeBean.class).value();
         SerializeDoc sdoc;
         try {
@@ -262,8 +263,7 @@ public abstract class DBRepository {
         return result;
     }
 
-    public InsertUpdate save(String tableName, Map<String, Object> doc, String primaryKey, boolean ignore)
-            throws RepositoryException {
+    public InsertUpdate save(String tableName, Map<String, Object> doc, String primaryKey, boolean ignore) {
         Object primaryValue = doc.remove(primaryKey);
         boolean updated = update(tableName, doc, primaryKey, primaryValue) > 0;
         if (updated) {
@@ -274,7 +274,7 @@ public abstract class DBRepository {
         return inserted ? InsertUpdate.INSERT : null;
     }
 
-    public <T> T findOne(String sql, Object[] params, DBRowMapper<T> mapper) throws RepositoryException {
+    public <T> T findOne(String sql, Object[] params, DBRowMapper<T> mapper) {
         List<Map<String, Object>> rawItems = getJdbcTemplate().queryForList(getPaginationDialect(sql, 0, 1), params);
         if (rawItems.isEmpty()) {
             return null;
@@ -283,8 +283,7 @@ public abstract class DBRepository {
         return mapper.map(rawItem);
     }
 
-    public <T> List<T> findList(String sql, Object[] params, int offset, int limit, DBRowMapper<T> mapper)
-            throws RepositoryException {
+    public <T> List<T> findList(String sql, Object[] params, int offset, int limit, DBRowMapper<T> mapper) {
         List<Map<String, Object>> rawItems = getJdbcTemplate().queryForList(getPaginationDialect(sql, offset, limit),
                 params);
         if (rawItems.isEmpty()) {
@@ -298,13 +297,13 @@ public abstract class DBRepository {
         return items;
     }
 
-    public int count(String sql, Object[] params) throws RepositoryException {
+    public int count(String sql, Object[] params) {
         Integer val = getJdbcTemplate().queryForObject(sql, params, Integer.class);
         return FormatUtil.parseIntValue(val, 0);
     }
 
     public <T> PullPagination<T> findPullPagination(String sql, Object[] params, String marker, int limit,
-            DBRowMapper<T> mapper) throws RepositoryException {
+            DBRowMapper<T> mapper) {
         int offset = marker == null ? 0 : Integer.parseInt(marker);
         List<Map<String, Object>> rawItems = getJdbcTemplate()
                 .queryForList(getPaginationDialect(sql, offset, limit + 1), params);
@@ -324,8 +323,7 @@ public abstract class DBRepository {
         return PullPagination.newInstance(items, String.valueOf(newOffset), hasMore);
     }
 
-    public <T> Pagination<T> findPagination(String sql, Object[] params, int offset, int limit, DBRowMapper<T> mapper)
-            throws RepositoryException {
+    public <T> Pagination<T> findPagination(String sql, Object[] params, int offset, int limit, DBRowMapper<T> mapper) {
         List<T> items = findList(sql, params, offset, limit, mapper);
         int size = items.size();
         if (size == 0) {
@@ -335,5 +333,46 @@ public abstract class DBRepository {
             size = count(getCountDialect(sql), params);
         }
         return new Pagination<T>(items, size, offset, limit);
+    }
+
+    public int removeByKey(String table, String keyName, Object key) {
+        StringBuilder sql = new StringBuilder("delete from ").append(table).append(" where ").append(keyName)
+                .append("=?");
+        return execute(sql.toString(), new Object[] { key });
+    }
+
+    public int removeByKeys(String table, String keyName, Collection<?> keys) {
+        StringBuilder sql = new StringBuilder("delete from ").append(table).append(" where ").append(keyName)
+                .append(" in(");
+        for (int i = 0; i < keys.size(); i++) {
+            if (i > 0) {
+                sql.append(",?");
+            } else {
+                sql.append('?');
+            }
+        }
+        sql.append(')');
+        return execute(sql.toString(), keys.toArray(new Object[keys.size()]));
+    }
+
+    public <T> T findByKey(String table, String selectKeys, String keyName, Object key, DBRowMapper<T> mapper) {
+        StringBuilder sql = new StringBuilder("select ").append(selectKeys != null ? selectKeys : "*").append(" from ")
+                .append(table).append(" where ").append(keyName).append("=?");
+        return findOne(sql.toString(), new Object[] { key }, mapper);
+    }
+
+    public <T> List<T> findByKeys(String table, String selectKeys, String keyName, Collection<?> keys,
+            DBRowMapper<T> mapper) {
+        StringBuilder sql = new StringBuilder("select ").append(selectKeys != null ? selectKeys : "*").append(" from ")
+                .append(table).append(" where ").append(keyName).append(" in(");
+        for (int i = 0; i < keys.size(); i++) {
+            if (i > 0) {
+                sql.append(",?");
+            } else {
+                sql.append('?');
+            }
+        }
+        sql.append(')');
+        return findList(sql.toString(), keys.toArray(new Object[keys.size()]), 0, 0, mapper);
     }
 }

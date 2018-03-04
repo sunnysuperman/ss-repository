@@ -1,7 +1,7 @@
 package com.sunnysuperman.repository;
 
-public class RepositoryException extends Exception {
-    private static final long serialVersionUID = 1970461509744960226L;
+public class RepositoryException extends RuntimeException {
+    private static final long serialVersionUID = -9138019877543723652L;
 
     public RepositoryException() {
     }

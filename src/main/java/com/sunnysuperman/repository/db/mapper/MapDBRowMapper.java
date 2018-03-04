@@ -1,10 +1,9 @@
-package com.sunnysuperman.repository.db;
+package com.sunnysuperman.repository.db.mapper;
 
 import java.util.Map;
 
 public class MapDBRowMapper implements DBRowMapper<Map<String, Object>> {
     private MapDBRowMapper() {
-
     }
 
     @Override

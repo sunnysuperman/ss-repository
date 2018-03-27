@@ -20,6 +20,14 @@ public class LogAwareJdbcTemplate extends JdbcTemplate {
         super(dataSource, lazyInit);
     }
 
+    public LogAwareJdbcTemplate() {
+        super();
+    }
+
+    public LogAwareJdbcTemplate(DataSource dataSource) {
+        super(dataSource);
+    }
+
     @Override
     public List<Map<String, Object>> queryForList(String sql, Object... args) throws DataAccessException {
         long t1 = System.nanoTime();
@@ -27,7 +35,7 @@ public class LogAwareJdbcTemplate extends JdbcTemplate {
             return super.queryForList(sql, args);
         } finally {
             long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
-            LOG.info("[JdbcTemplate] {}, take {} ms", sql, take);
+            LOG.info("[Jdbc] {}, take {} ms", sql, take);
         }
     }
 
@@ -39,9 +47,9 @@ public class LogAwareJdbcTemplate extends JdbcTemplate {
         } finally {
             long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
             if (psc instanceof CreateWithGeneratedKeyStatement) {
-                LOG.info("[JdbcTemplate] {}, take {} ms", ((CreateWithGeneratedKeyStatement) psc).getSql(), take);
+                LOG.info("[Jdbc] {}, take {} ms", ((CreateWithGeneratedKeyStatement) psc).getSql(), take);
             } else {
-                LOG.info("[JdbcTemplate] {}, take {} ms", psc.toString(), take);
+                LOG.info("[Jdbc] {}, take {} ms", psc.toString(), take);
             }
         }
     }
@@ -53,7 +61,18 @@ public class LogAwareJdbcTemplate extends JdbcTemplate {
             return super.update(sql, args);
         } finally {
             long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
-            LOG.info("[JdbcTemplate] {}, take {} ms", sql, take);
+            LOG.info("[Jdbc] {}, take {} ms", sql, take);
+        }
+    }
+
+    @Override
+    public int[] batchUpdate(String sql, List<Object[]> batchArgs) throws DataAccessException {
+        long t1 = System.nanoTime();
+        try {
+            return super.batchUpdate(sql, batchArgs);
+        } finally {
+            long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
+            LOG.info("[Jdbc] {}, take {} ms", sql, take);
         }
     }
 }

@@ -9,8 +9,8 @@ import java.lang.annotation.Target;
 @Retention(value = RetentionPolicy.RUNTIME)
 public @interface SerializeId {
 
-    IdGenerator strategy() default IdGenerator.INCREMENT;
+    IdGenerator generator();
 
-    Class<? extends Number> incrementClass() default Long.class;
+    Class<? extends Number> type() default Long.class;
 
 }

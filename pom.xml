@@ -3,7 +3,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.sunnysuperman</groupId>
 	<artifactId>ss-repository</artifactId>
-	<version>0.1.2</version>
+	<version>0.2</version>
 	<packaging>jar</packaging>
 	<name>${project.artifactId}</name>
 	<url>https://github.com/sunnysuperman/${project.artifactId}</url>
@@ -20,7 +20,6 @@
 	</repositories>
 
 	<dependencies>
-		<!-- test -->
 		<dependency>
 			<groupId>junit</groupId>
 			<artifactId>junit</artifactId>
@@ -31,7 +30,7 @@
 		<dependency>
 			<groupId>com.sunnysuperman</groupId>
 			<artifactId>ss-commons</artifactId>
-			<version>0.1</version>
+			<version>0.2</version>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework</groupId>
@@ -45,8 +44,6 @@
 		</dependency>
 	</dependencies>
 
-
-
 	<build>
 		<finalName>${project.name}</finalName>
 		<plugins>
@@ -55,16 +52,11 @@
 				<artifactId>maven-compiler-plugin</artifactId>
 				<version>3.2</version>
 				<configuration>
-					<!-- <source>${cfg.compileVersion}</source> <target>${cfg.compileVersion}</target> -->
 					<source>1.7</source>
 					<target>1.7</target>
 					<encoding>UTF-8</encoding>
 				</configuration>
 			</plugin>
-
-			<!-- generate jar -->
-			<!-- <plugin> <artifactId>maven-jar-plugin</artifactId> <configuration> 
-				<classifier>${cfg.classifier}</classifier> </configuration> </plugin> -->
 
 			<!-- skip test -->
 			<plugin>
@@ -77,5 +69,4 @@
 			</plugin>
 		</plugins>
 	</build>
-
 </project>

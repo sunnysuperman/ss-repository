@@ -11,17 +11,16 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 import org.reflections.Reflections;
 
 import com.sunnysuperman.commons.bean.Bean;
-import com.sunnysuperman.commons.model.ObjectId;
 import com.sunnysuperman.commons.util.FormatUtil;
 import com.sunnysuperman.commons.util.StringUtil;
 import com.sunnysuperman.repository.InsertUpdate;
+import com.sunnysuperman.repository.RepositoryException;
 
-public class SerializeBeanUtils {
+public class SerializeManager {
 
     private static class SerializeMeta {
         private List<SerializeField> normalFields;
@@ -30,6 +29,7 @@ public class SerializeBeanUtils {
     }
 
     private static class SerializeField {
+        private String fieldName;
         private String columnName;
         private Method readMethod;
         private Method writeMethod;
@@ -37,15 +37,19 @@ public class SerializeBeanUtils {
         private Method relationReadMethod;
         private SerializeProperty property;
 
-        public Object getValue(Object bean) throws Exception {
-            Object value = readMethod.invoke(bean);
-            if (value == null) {
-                return null;
+        public Object getValue(Object bean) {
+            try {
+                Object value = readMethod.invoke(bean);
+                if (value == null) {
+                    return null;
+                }
+                if (property.relation() == Relation.NONE) {
+                    return value;
+                }
+                return relationReadMethod.invoke(value);
+            } catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
+                throw new RepositoryException(e);
             }
-            if (property.relation() == Relation.NONE) {
-                return value;
-            }
-            return relationReadMethod.invoke(value);
         }
     }
 
@@ -92,21 +96,19 @@ public class SerializeBeanUtils {
                 // not a serialize property
                 continue;
             }
-            if (!property.insertable() && !property.updatable()) {
-                throw new RuntimeException(clazz + "." + fieldName + " is neither insertable nor updatable");
-            }
             String columnName = property.column();
             if (columnName == null || columnName.isEmpty()) {
                 columnName = fieldName;
             }
             columnName = StringUtil.camel2underline(columnName);
             if (columnNames.contains(columnName)) {
-                throw new RuntimeException("Duplicated column '" + columnName + "' in " + clazz);
+                throw new RepositoryException("Duplicated column '" + columnName + "' in " + clazz);
             }
             columnNames.add(columnName);
             SerializeField sfield = new SerializeField();
             sfield.readMethod = method;
             sfield.writeMethod = clazz.getMethod("set" + capitalize(fieldName), method.getReturnType());
+            sfield.fieldName = fieldName;
             sfield.columnName = columnName;
             sfield.property = property;
             if (property.relation() != Relation.NONE) {
@@ -115,7 +117,7 @@ public class SerializeBeanUtils {
             }
             if (field != null && field.getAnnotation(SerializeId.class) != null) {
                 if (idField != null) {
-                    throw new RuntimeException("Duplicated id column of " + clazz);
+                    throw new RepositoryException("Duplicated id column of " + clazz);
                 }
                 idField = sfield;
                 idInfo = field.getAnnotation(SerializeId.class);
@@ -139,7 +141,7 @@ public class SerializeBeanUtils {
         }
         Method method = getIdWriteMethod(relationClass);
         if (method == null) {
-            throw new RuntimeException(
+            throw new RepositoryException(
                     readMethod.getClass() + "." + columnName + ": could not get relation write method");
         }
         return method;
@@ -154,7 +156,7 @@ public class SerializeBeanUtils {
         }
         Method method = getIdReadMethod(relationClass);
         if (method == null) {
-            throw new RuntimeException(
+            throw new RepositoryException(
                     readMethod.getClass() + "." + columnName + ": could not get relation read method");
         }
         return method;
@@ -210,7 +212,7 @@ public class SerializeBeanUtils {
     }
 
     public static void scan(String packageName) throws Exception {
-        Reflections reflections = new Reflections(packageName);
+        Reflections reflections = packageName != null ? new Reflections(packageName) : new Reflections();
         Set<Class<?>> classes = reflections.getTypesAnnotatedWith(SerializeBean.class);
         for (Class<?> clazz : classes) {
             META_MAP.put(clazz, getSerializeMeta(clazz));
@@ -229,20 +231,21 @@ public class SerializeBeanUtils {
             } else if (idClass.equals(Long.class)) {
                 convertedId = FormatUtil.parseLong(id);
             } else {
-                throw new RuntimeException("Failed to convert " + id.getClass() + " to " + idClass);
+                throw new RepositoryException("Failed to convert " + id.getClass() + " to " + idClass);
             }
         }
         try {
             meta.idField.writeMethod.invoke(bean, convertedId);
         } catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
-            throw new RuntimeException(e);
+            throw new RepositoryException(e);
         }
     }
 
-    public static SerializeDoc serialize(Object bean, InsertUpdate insertUpdate) throws Exception {
+    public static SerializeDoc serialize(Object bean, Set<String> fields, InsertUpdate insertUpdate)
+            throws RepositoryException {
         SerializeMeta meta = META_MAP.get(bean.getClass());
         if (meta == null) {
-            throw new RuntimeException(bean.getClass() + " is not annotated with SerializeBean");
+            throw new RepositoryException(bean.getClass() + " is not annotated with SerializeBean");
         }
         SerializeDoc sdoc = new SerializeDoc();
         Object id = null;
@@ -261,34 +264,36 @@ public class SerializeBeanUtils {
                 update = id != null;
                 break;
             default:
-                throw new RuntimeException("Unknown InsertUpdate");
+                throw new RepositoryException("Unknown InsertUpdate");
             }
         }
         if (update) {
             if (id == null) {
-                throw new RuntimeException("No id set to update");
+                throw new RepositoryException("No id set to update");
             }
             sdoc.setIdValues(new Object[] { id });
             if (insertUpdate == InsertUpdate.RUNTIME) {
-                sdoc.setUpsert(meta.idInfo.strategy() == IdGenerator.PROVIDE);
+                sdoc.setUpsert(meta.idInfo.generator() == IdGenerator.PROVIDE);
             }
         } else {
             SerializeId idInfo = meta.idInfo;
             if (idInfo != null) {
-                switch (idInfo.strategy()) {
-                case INCREMENT:
-                    sdoc.setIdIncrementClass(idInfo.incrementClass());
+                switch (idInfo.generator()) {
+                case INCREMENT: {
+                    Class<?> desiredClass = meta.idField.readMethod.getReturnType();
+                    if (desiredClass == Long.class) {
+                        sdoc.setIdIncrementClass(Long.class);
+                    } else if (desiredClass == Integer.class) {
+                        sdoc.setIdIncrementClass(Integer.class);
+                    } else {
+                        sdoc.setIdIncrementClass(idInfo.type());
+                    }
                     break;
-                case UUID:
-                    id = UUID.randomUUID().toString().replaceAll("-", "");
-                    break;
-                case OBJECTID:
-                    id = new ObjectId().toHexString();
-                    break;
+                }
                 case PROVIDE:
                     break;
                 default:
-                    throw new RuntimeException("Unsupported id generator " + idInfo.strategy());
+                    throw new RepositoryException("Unsupported id generator " + idInfo.generator());
                 }
             }
         }
@@ -296,19 +301,32 @@ public class SerializeBeanUtils {
         sdoc.setDoc(doc);
         for (SerializeField sfield : meta.normalFields) {
             SerializeProperty property = sfield.property;
-            if (update) {
-                if (!property.updatable()) {
+            if (fields != null) {
+                // 指定字段插入或更新
+                if (!fields.contains(sfield.fieldName)) {
                     continue;
                 }
-            } else if (!property.insertable()) {
-                continue;
+            } else {
+                // 根据bean定义的字段插入或更新
+                if (update) {
+                    if (!property.updatable()) {
+                        continue;
+                    }
+                } else if (!property.insertable()) {
+                    continue;
+                }
             }
-            doc.put(sfield.columnName, sfield.getValue(bean));
+            Object value = sfield.getValue(bean);
+            doc.put(sfield.columnName, value);
         }
         if (!update && id != null) {
             doc.put(sdoc.getIdColumns()[0], id);
         }
         return sdoc;
+    }
+
+    public static SerializeDoc serialize(Object bean, InsertUpdate insertUpdate) throws RepositoryException {
+        return serialize(bean, null, insertUpdate);
     }
 
     private static boolean setPropertyValue(Object object, SerializeField sfield, Map<String, Object> doc)
@@ -330,16 +348,24 @@ public class SerializeBeanUtils {
         return true;
     }
 
-    public static <T> T deserialize(Map<String, Object> doc, Class<T> clazz) throws Exception {
+    public static <T> T deserialize(Map<String, Object> doc, Class<T> clazz) throws RepositoryException {
         SerializeMeta meta = META_MAP.get(clazz);
         if (meta == null) {
-            throw new RuntimeException(clazz + " is not annotated with SerializeBean");
+            throw new RepositoryException(clazz + " is not annotated with SerializeBean");
         }
-        T object = clazz.newInstance();
-        for (SerializeField sfield : meta.normalFields) {
-            setPropertyValue(object, sfield, doc);
+        try {
+            T object = clazz.newInstance();
+            for (SerializeField sfield : meta.normalFields) {
+                setPropertyValue(object, sfield, doc);
+            }
+            if (meta.idField != null) {
+                setPropertyValue(object, meta.idField, doc);
+            }
+            return object;
+        } catch (RepositoryException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new RepositoryException(ex);
         }
-        setPropertyValue(object, meta.idField, doc);
-        return object;
     }
 }

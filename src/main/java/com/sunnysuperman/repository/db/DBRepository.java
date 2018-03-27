@@ -1,14 +1,15 @@
 package com.sunnysuperman.repository.db;
 
-import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -22,8 +23,8 @@ import com.sunnysuperman.repository.RepositoryException;
 import com.sunnysuperman.repository.SaveResult;
 import com.sunnysuperman.repository.db.mapper.DBRowMapper;
 import com.sunnysuperman.repository.serialize.SerializeBean;
-import com.sunnysuperman.repository.serialize.SerializeBeanUtils;
 import com.sunnysuperman.repository.serialize.SerializeDoc;
+import com.sunnysuperman.repository.serialize.SerializeManager;
 
 public abstract class DBRepository {
 
@@ -35,20 +36,38 @@ public abstract class DBRepository {
                 || type == Byte.class || type == Boolean.class || type == String.class;
     }
 
-    protected static Object serializeObject(Object value) {
+    protected Object serializeObject(Object value) {
         if (value == null) {
             return null;
+        }
+        if (isSimpleType(value.getClass())) {
+            return value;
         }
         if (value instanceof Date) {
             return ((Date) value).getTime();
         }
-        if (isSimpleType(value.getClass())) {
+        if (value.getClass().isArray() && value.getClass().getComponentType().equals(byte.class)) {
+            // byte array (should be blob type)
             return value;
         }
         return JSONUtil.toJSONString(value);
     }
 
-    protected static String getInsertDialect(Map<String, ?> kv, String tableName, List<Object> params, boolean ignore) {
+    protected Object[] serializeParams(Object[] params) {
+        if (params == null || params.length == 0) {
+            return null;
+        }
+        for (int i = 0; i < params.length; i++) {
+            params[i] = serializeObject(params[i]);
+        }
+        return params;
+    }
+
+    protected String convertColumnName(String columnName) {
+        return columnName;
+    }
+
+    protected String getInsertDialect(Map<String, ?> kv, String tableName, List<Object> params, boolean ignore) {
         StringBuilder buf = new StringBuilder(ignore ? "insert ignore into " : "insert into ");
         buf.append(tableName);
         buf.append('(');
@@ -62,7 +81,7 @@ public abstract class DBRepository {
                 buf.append(',');
                 buf2.append(',');
             }
-            buf.append(entry.getKey());
+            buf.append(convertColumnName(entry.getKey()));
             Object fieldValue = entry.getValue();
             if (fieldValue != null && fieldValue instanceof DBFunction) {
                 DBFunction cf = (DBFunction) fieldValue;
@@ -84,14 +103,14 @@ public abstract class DBRepository {
         return buf.toString();
     }
 
-    protected static String getPaginationDialect(String sql, int offset, int limit) {
+    protected String getPaginationDialect(String sql, int offset, int limit) {
         if (limit <= 0) {
             return sql;
         }
         return new StringBuilder(sql).append(" limit ").append(offset).append(",").append(limit).toString();
     }
 
-    protected static String getCountDialect(String sql) {
+    protected String getCountDialect(String sql) {
         int index1 = sql.indexOf("from");
         if (index1 <= 0) {
             throw new RuntimeException("Bad sql: " + sql);
@@ -104,32 +123,26 @@ public abstract class DBRepository {
         return buf.toString();
     }
 
-    protected static Object[] serializeParams(Object[] params) {
-        if (params == null || params.length == 0) {
-            return null;
-        }
-        for (int i = 0; i < params.length; i++) {
-            params[i] = serializeObject(params[i]);
-        }
-        return params;
-    }
-
     public int execute(String sql, Object[] params) {
         return getJdbcTemplate().update(sql, serializeParams(params));
     }
 
-    public boolean insert(String tableName, Map<String, ?> doc, boolean ignore) {
+    public int[] batchExecute(String sql, List<Object[]> batchParams) {
+        return getJdbcTemplate().batchUpdate(sql, batchParams);
+    }
+
+    public boolean insertDoc(String tableName, Map<String, ?> doc, boolean ignore) {
         List<Object> params = new ArrayList<Object>(doc.size());
         String sql = getInsertDialect(doc, tableName, params, ignore);
         return execute(sql, params.toArray(new Object[params.size()])) > 0;
     }
 
-    public boolean insert(String tableName, Map<String, ?> doc) {
-        return insert(tableName, doc, false);
+    public boolean insertDoc(String tableName, Map<String, ?> doc) {
+        return insertDoc(tableName, doc, false);
     }
 
     @SuppressWarnings("unchecked")
-    public <T extends Number> T insert(String tableName, Map<String, ?> doc, boolean ignore,
+    public <T extends Number> T insertDoc(String tableName, Map<String, ?> doc, boolean ignore,
             Class<T> generatedKeyClass) {
         List<Object> params = new ArrayList<Object>(doc.size());
         String sql = getInsertDialect(doc, tableName, params, ignore);
@@ -154,7 +167,50 @@ public abstract class DBRepository {
         return (T) key;
     }
 
-    public int update(String tableName, Map<String, ?> doc, Object primaryKey, Object primaryValue) {
+    public <T extends Number> T insertDoc(String tableName, Map<String, ?> doc, Class<T> generatedKeyClass) {
+        return insertDoc(tableName, doc, false, generatedKeyClass);
+    }
+
+    public void insertDocs(String tableName, List<Map<String, Object>> docs) {
+        Map<String, Object> testDoc = docs.get(0);
+        String[] keys = new String[testDoc.size()];
+        List<Object[]> paramsList = new ArrayList<>(docs.size());
+        String sql;
+        {
+            int i = 0;
+            StringBuilder buf = new StringBuilder("insert into ");
+            StringBuilder buf2 = new StringBuilder();
+            buf.append(tableName);
+            buf.append('(');
+            for (Entry<String, Object> entry : testDoc.entrySet()) {
+                String key = entry.getKey();
+                keys[i] = key;
+                if (i > 0) {
+                    buf.append(',');
+                    buf2.append(',');
+                }
+                buf.append(convertColumnName(key));
+                buf2.append('?');
+                i++;
+            }
+
+            buf.append(") values(");
+            buf.append(buf2);
+            buf.append(')');
+            sql = buf.toString();
+        }
+        for (Map<String, Object> doc : docs) {
+            Object[] params = new Object[keys.length];
+            for (int i = 0; i < keys.length; i++) {
+                Object value = doc.get(keys[i]);
+                params[i] = value;
+            }
+            paramsList.add(params);
+        }
+        getJdbcTemplate().batchUpdate(sql, paramsList);
+    }
+
+    public int updateDoc(String tableName, Map<String, ?> doc, String[] keys, Object[] values) {
         StringBuilder buf = new StringBuilder("update ");
         buf.append(tableName);
         buf.append(" set ");
@@ -167,7 +223,7 @@ public abstract class DBRepository {
                 if (fieldKey.equals("$inc")) {
                     Map<?, ?> fieldValueAsMap = (Map<?, ?>) fieldValue;
                     for (Entry<?, ?> incEntry : fieldValueAsMap.entrySet()) {
-                        String incKey = incEntry.getKey().toString();
+                        String incKey = convertColumnName(incEntry.getKey().toString());
                         Number incValue = FormatUtil.parseNumber(incEntry.getValue());
                         if (offset > 0) {
                             buf.append(",");
@@ -179,6 +235,7 @@ public abstract class DBRepository {
                 }
                 continue;
             }
+            fieldKey = convertColumnName(fieldKey);
             if (offset > 0) {
                 buf.append(",");
             }
@@ -186,10 +243,10 @@ public abstract class DBRepository {
             buf.append(fieldKey);
             if (fieldValue != null && fieldValue instanceof DBFunction) {
                 // column=ST_GeometryFromText(?,4326), column=point(?,?), etc.
-                DBFunction cf = (DBFunction) fieldValue;
-                buf.append("=").append(cf.getFunction());
-                if (cf.getParams() != null) {
-                    for (Object param : cf.getParams()) {
+                DBFunction func = (DBFunction) fieldValue;
+                buf.append("=").append(func.getFunction());
+                if (func.getParams() != null) {
+                    for (Object param : func.getParams()) {
                         params.add(param);
                     }
                 }
@@ -199,47 +256,58 @@ public abstract class DBRepository {
             }
         }
         buf.append(" where ");
-        if (primaryKey.getClass().isArray()) {
-            // where pk1=? and pk2=?
-            int length = Array.getLength(primaryKey);
-            for (int i = 0; i < length; i++) {
-                Object pk = Array.get(primaryKey, i);
-                if (i > 0) {
-                    buf.append(" and ");
-                }
-                buf.append(pk);
-                buf.append("=?");
-                params.add(Array.get(primaryValue, i));
+        for (int i = 0; i < keys.length; i++) {
+            if (i > 0) {
+                buf.append(" and ");
             }
-        } else {
-            buf.append(primaryKey);
+            String pk = keys[i];
+            buf.append(convertColumnName(pk));
             buf.append("=?");
-            params.add(primaryValue);
+            params.add(values[i]);
         }
         Object[] paramsAsArray = params.toArray(new Object[params.size()]);
         return execute(buf.toString(), paramsAsArray);
     }
 
-    public SaveResult save(Object bean) {
-        return save(bean, InsertUpdate.RUNTIME);
+    public int updateDoc(String tableName, Map<String, ?> doc, String key, Object value) {
+        return updateDoc(tableName, doc, new String[] { key }, new Object[] { value });
     }
 
-    public SaveResult save(Object bean, InsertUpdate insertUpdate) {
+    public InsertUpdate saveDoc(String tableName, Map<String, Object> doc, String primaryKey, boolean ignore) {
+        Object primaryValue = doc.remove(primaryKey);
+        if (primaryValue == null) {
+            boolean inserted = insertDoc(tableName, doc, ignore);
+            return inserted ? InsertUpdate.INSERT : null;
+        }
+        boolean updated = updateDoc(tableName, doc, primaryKey, primaryValue) > 0;
+        if (updated) {
+            return InsertUpdate.UPDATE;
+        }
+        doc.put(primaryKey, primaryValue);
+        boolean inserted = insertDoc(tableName, doc, ignore);
+        return inserted ? InsertUpdate.INSERT : null;
+    }
+
+    public <T> SaveResult save(T bean, Set<String> fields, InsertUpdate insertUpdate, SerializeDocWrapper<T> wrapper) {
         String tableName = bean.getClass().getAnnotation(SerializeBean.class).value();
         SerializeDoc sdoc;
         try {
-            sdoc = SerializeBeanUtils.serialize(bean, insertUpdate);
+            sdoc = SerializeManager.serialize(bean, fields, insertUpdate);
         } catch (Exception ex) {
             throw new RepositoryException(ex);
         }
         SaveResult result = new SaveResult();
+        Map<String, Object> doc = sdoc.getDoc();
+        if (wrapper != null) {
+            doc = wrapper.wrap(doc, bean);
+        }
         if (sdoc.getIdValues() != null) {
-            boolean updated = update(tableName, sdoc.getDoc(), sdoc.getIdColumns(), sdoc.getIdValues()) > 0;
+            boolean updated = updateDoc(tableName, doc, sdoc.getIdColumns(), sdoc.getIdValues()) > 0;
             if (!updated && sdoc.isUpsert()) {
                 for (int i = 0; i < sdoc.getIdColumns().length; i++) {
-                    sdoc.getDoc().put(sdoc.getIdColumns()[i], sdoc.getIdValues()[i]);
+                    doc.put(sdoc.getIdColumns()[i], sdoc.getIdValues()[i]);
                 }
-                boolean inserted = insert(tableName, sdoc.getDoc());
+                boolean inserted = insertDoc(tableName, doc);
                 result.setInserted(inserted);
             } else {
                 result.setUpdated(updated);
@@ -248,33 +316,46 @@ public abstract class DBRepository {
             Class<? extends Number> idIncrementClass = sdoc.getIdIncrementClass();
             Number id;
             if (idIncrementClass != null) {
-                id = insert(tableName, sdoc.getDoc(), false, idIncrementClass);
+                id = insertDoc(tableName, doc, false, idIncrementClass);
                 if (id == null) {
-                    throw new RepositoryException("Failed to insert");
+                    throw new RepositoryException("Failed to insert and generate id");
                 }
                 result.setInserted(true);
                 result.setGeneratedId(id);
-                SerializeBeanUtils.setIncrementId(bean, id);
+                SerializeManager.setIncrementId(bean, id);
             } else {
-                boolean inserted = insert(tableName, sdoc.getDoc());
+                boolean inserted = insertDoc(tableName, doc);
                 result.setInserted(inserted);
             }
         }
         return result;
     }
 
-    public InsertUpdate save(String tableName, Map<String, Object> doc, String primaryKey, boolean ignore) {
-        Object primaryValue = doc.remove(primaryKey);
-        boolean updated = update(tableName, doc, primaryKey, primaryValue) > 0;
-        if (updated) {
-            return InsertUpdate.UPDATE;
-        }
-        doc.put(primaryKey, primaryValue);
-        boolean inserted = insert(tableName, doc, ignore);
-        return inserted ? InsertUpdate.INSERT : null;
+    public SaveResult save(Object bean) {
+        return save(bean, null, InsertUpdate.RUNTIME, null);
     }
 
-    public <T> T findOne(String sql, Object[] params, DBRowMapper<T> mapper) {
+    public <T> SaveResult save(T bean, SerializeDocWrapper<T> wrapper) {
+        return save(bean, null, InsertUpdate.RUNTIME, wrapper);
+    }
+
+    public Object insert(Object bean) {
+        return save(bean, null, InsertUpdate.INSERT, null).getGeneratedId();
+    }
+
+    public <T> Object insert(T bean, SerializeDocWrapper<T> wrapper) {
+        return save(bean, null, InsertUpdate.INSERT, wrapper).getGeneratedId();
+    }
+
+    public boolean update(Object bean, Set<String> fields) {
+        return save(bean, fields, InsertUpdate.UPDATE, null).isUpdated();
+    }
+
+    public <T> boolean update(T bean, Set<String> fields, SerializeDocWrapper<T> wrapper) {
+        return save(bean, fields, InsertUpdate.UPDATE, wrapper).isUpdated();
+    }
+
+    public <T> T query(String sql, Object[] params, DBRowMapper<T> mapper) {
         List<Map<String, Object>> rawItems = getJdbcTemplate().queryForList(getPaginationDialect(sql, 0, 1), params);
         if (rawItems.isEmpty()) {
             return null;
@@ -283,7 +364,7 @@ public abstract class DBRepository {
         return mapper.map(rawItem);
     }
 
-    public <T> List<T> findList(String sql, Object[] params, int offset, int limit, DBRowMapper<T> mapper) {
+    public <T> List<T> queryForList(String sql, Object[] params, int offset, int limit, DBRowMapper<T> mapper) {
         List<Map<String, Object>> rawItems = getJdbcTemplate().queryForList(getPaginationDialect(sql, offset, limit),
                 params);
         if (rawItems.isEmpty()) {
@@ -297,12 +378,34 @@ public abstract class DBRepository {
         return items;
     }
 
-    public int count(String sql, Object[] params) {
-        Integer val = getJdbcTemplate().queryForObject(sql, params, Integer.class);
-        return FormatUtil.parseIntValue(val, 0);
+    public <T> Set<T> queryForSet(String sql, Object[] params, int offset, int limit, DBRowMapper<T> mapper) {
+        List<Map<String, Object>> rawItems = getJdbcTemplate().queryForList(getPaginationDialect(sql, offset, limit),
+                params);
+        if (rawItems.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Set<T> items = new HashSet<>(rawItems.size());
+        for (Map<String, Object> rawItem : rawItems) {
+            T item = mapper.map(rawItem);
+            items.add(item);
+        }
+        return items;
     }
 
-    public <T> PullPagination<T> findPullPagination(String sql, Object[] params, String marker, int limit,
+    public <T> Pagination<T> queryForPagination(String sql, Object[] params, int offset, int limit,
+            DBRowMapper<T> mapper) {
+        List<T> items = queryForList(sql, params, offset, limit, mapper);
+        int size = items.size();
+        if (size == 0) {
+            return Pagination.emptyInstance(limit);
+        }
+        if (offset != 0 || size == limit) {
+            size = count(getCountDialect(sql), params);
+        }
+        return new Pagination<T>(items, size, offset, limit);
+    }
+
+    public <T> PullPagination<T> queryForPullPagination(String sql, Object[] params, String marker, int limit,
             DBRowMapper<T> mapper) {
         int offset = marker == null ? 0 : Integer.parseInt(marker);
         List<Map<String, Object>> rawItems = getJdbcTemplate()
@@ -323,27 +426,41 @@ public abstract class DBRepository {
         return PullPagination.newInstance(items, String.valueOf(newOffset), hasMore);
     }
 
-    public <T> Pagination<T> findPagination(String sql, Object[] params, int offset, int limit, DBRowMapper<T> mapper) {
-        List<T> items = findList(sql, params, offset, limit, mapper);
-        int size = items.size();
-        if (size == 0) {
-            return Pagination.emptyInstance(limit);
+    public <T> T queryByKey(String table, String selectKeys, String keyName, Object key, DBRowMapper<T> mapper) {
+        StringBuilder sql = new StringBuilder("select ").append(selectKeys != null ? selectKeys : "*").append(" from ")
+                .append(table).append(" where ").append(convertColumnName(keyName)).append("=?");
+        return query(sql.toString(), new Object[] { key }, mapper);
+    }
+
+    public <T> List<T> queryByKeys(String table, String selectKeys, String keyName, Collection<?> keys,
+            DBRowMapper<T> mapper) {
+        StringBuilder sql = new StringBuilder("select ").append(selectKeys != null ? selectKeys : "*").append(" from ")
+                .append(table).append(" where ").append(convertColumnName(keyName)).append(" in(");
+        for (int i = 0; i < keys.size(); i++) {
+            if (i > 0) {
+                sql.append(",?");
+            } else {
+                sql.append('?');
+            }
         }
-        if (offset != 0 || size == limit) {
-            size = count(getCountDialect(sql), params);
-        }
-        return new Pagination<T>(items, size, offset, limit);
+        sql.append(')');
+        return queryForList(sql.toString(), keys.toArray(new Object[keys.size()]), 0, 0, mapper);
+    }
+
+    public int count(String sql, Object[] params) {
+        Integer val = getJdbcTemplate().queryForObject(sql, params, Integer.class);
+        return FormatUtil.parseIntValue(val, 0);
     }
 
     public int removeByKey(String table, String keyName, Object key) {
-        StringBuilder sql = new StringBuilder("delete from ").append(table).append(" where ").append(keyName)
-                .append("=?");
+        StringBuilder sql = new StringBuilder("delete from ").append(table).append(" where ")
+                .append(convertColumnName(keyName)).append("=?");
         return execute(sql.toString(), new Object[] { key });
     }
 
     public int removeByKeys(String table, String keyName, Collection<?> keys) {
-        StringBuilder sql = new StringBuilder("delete from ").append(table).append(" where ").append(keyName)
-                .append(" in(");
+        StringBuilder sql = new StringBuilder("delete from ").append(table).append(" where ")
+                .append(convertColumnName(keyName)).append(" in(");
         for (int i = 0; i < keys.size(); i++) {
             if (i > 0) {
                 sql.append(",?");
@@ -353,26 +470,5 @@ public abstract class DBRepository {
         }
         sql.append(')');
         return execute(sql.toString(), keys.toArray(new Object[keys.size()]));
-    }
-
-    public <T> T findByKey(String table, String selectKeys, String keyName, Object key, DBRowMapper<T> mapper) {
-        StringBuilder sql = new StringBuilder("select ").append(selectKeys != null ? selectKeys : "*").append(" from ")
-                .append(table).append(" where ").append(keyName).append("=?");
-        return findOne(sql.toString(), new Object[] { key }, mapper);
-    }
-
-    public <T> List<T> findByKeys(String table, String selectKeys, String keyName, Collection<?> keys,
-            DBRowMapper<T> mapper) {
-        StringBuilder sql = new StringBuilder("select ").append(selectKeys != null ? selectKeys : "*").append(" from ")
-                .append(table).append(" where ").append(keyName).append(" in(");
-        for (int i = 0; i < keys.size(); i++) {
-            if (i > 0) {
-                sql.append(",?");
-            } else {
-                sql.append('?');
-            }
-        }
-        sql.append(')');
-        return findList(sql.toString(), keys.toArray(new Object[keys.size()]), 0, 0, mapper);
     }
 }

@@ -4,6 +4,8 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -31,6 +33,7 @@ public class SerializeManager {
     private static class SerializeField {
         private String fieldName;
         private String columnName;
+        private Field field;
         private Method readMethod;
         private Method writeMethod;
         private Method relationWriteMethod;
@@ -106,6 +109,7 @@ public class SerializeManager {
             }
             columnNames.add(columnName);
             SerializeField sfield = new SerializeField();
+            sfield.field = field;
             sfield.readMethod = method;
             sfield.writeMethod = clazz.getMethod("set" + capitalize(fieldName), method.getReturnType());
             sfield.fieldName = fieldName;
@@ -342,7 +346,14 @@ public class SerializeManager {
             value = Bean.parse(value, sfield.relationWriteMethod.getParameterTypes()[0]);
             sfield.relationWriteMethod.invoke(relationInstance, value);
         } else {
-            value = Bean.parse(value, destClass);
+            ParameterizedType pType = null;
+            if (sfield.field != null) {
+                Type type = sfield.field.getGenericType();
+                if (type instanceof ParameterizedType) {
+                    pType = (ParameterizedType) type;
+                }
+            }
+            value = Bean.parse(value, destClass, pType, null, null);
             sfield.writeMethod.invoke(object, value);
         }
         return true;

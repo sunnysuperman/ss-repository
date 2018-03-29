@@ -202,7 +202,7 @@ public abstract class DBRepository {
         for (Map<String, Object> doc : docs) {
             Object[] params = new Object[keys.length];
             for (int i = 0; i < keys.length; i++) {
-                Object value = doc.get(keys[i]);
+                Object value = serializeObject(doc.get(keys[i]));
                 params[i] = value;
             }
             paramsList.add(params);

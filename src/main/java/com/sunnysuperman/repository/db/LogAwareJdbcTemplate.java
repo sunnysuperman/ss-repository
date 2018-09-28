@@ -40,6 +40,17 @@ public class LogAwareJdbcTemplate extends JdbcTemplate {
     }
 
     @Override
+    public <T> T queryForObject(String sql, Object[] args, Class<T> requiredType) throws DataAccessException {
+        long t1 = System.nanoTime();
+        try {
+            return super.queryForObject(sql, args, requiredType);
+        } finally {
+            long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
+            LOG.info("[Jdbc] {}, take {} ms", sql, take);
+        }
+    }
+
+    @Override
     public int update(PreparedStatementCreator psc, KeyHolder generatedKeyHolder) throws DataAccessException {
         long t1 = System.nanoTime();
         try {

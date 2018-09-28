@@ -8,6 +8,7 @@ public class SerializeDoc {
     private Object[] idValues;
     private Class<? extends Number> idIncrementClass;
     private boolean upsert;
+    private String tableName;
 
     public Map<String, Object> getDoc() {
         return doc;
@@ -47,6 +48,14 @@ public class SerializeDoc {
 
     public void setUpsert(boolean upsert) {
         this.upsert = upsert;
+    }
+
+    public String getTableName() {
+        return tableName;
+    }
+
+    public void setTableName(String tableName) {
+        this.tableName = tableName;
     }
 
 }

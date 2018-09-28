@@ -11,4 +11,6 @@ public @interface SerializeBean {
 
     String value();
 
+    boolean camel2underline() default true;
+
 }

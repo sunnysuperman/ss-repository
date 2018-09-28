@@ -22,7 +22,6 @@ import com.sunnysuperman.repository.InsertUpdate;
 import com.sunnysuperman.repository.RepositoryException;
 import com.sunnysuperman.repository.SaveResult;
 import com.sunnysuperman.repository.db.mapper.DBRowMapper;
-import com.sunnysuperman.repository.serialize.SerializeBean;
 import com.sunnysuperman.repository.serialize.SerializeDoc;
 import com.sunnysuperman.repository.serialize.SerializeManager;
 
@@ -172,6 +171,10 @@ public abstract class DBRepository {
     }
 
     public void insertDocs(String tableName, List<Map<String, Object>> docs) {
+        if (docs.size() == 1) {
+            insertDoc(tableName, docs.get(0));
+            return;
+        }
         Map<String, Object> testDoc = docs.get(0);
         String[] keys = new String[testDoc.size()];
         List<Object[]> paramsList = new ArrayList<>(docs.size());
@@ -289,13 +292,13 @@ public abstract class DBRepository {
     }
 
     public <T> SaveResult save(T bean, Set<String> fields, InsertUpdate insertUpdate, SerializeDocWrapper<T> wrapper) {
-        String tableName = bean.getClass().getAnnotation(SerializeBean.class).value();
         SerializeDoc sdoc;
         try {
             sdoc = SerializeManager.serialize(bean, fields, insertUpdate);
         } catch (Exception ex) {
             throw new RepositoryException(ex);
         }
+        String tableName = sdoc.getTableName();
         SaveResult result = new SaveResult();
         Map<String, Object> doc = sdoc.getDoc();
         if (wrapper != null) {

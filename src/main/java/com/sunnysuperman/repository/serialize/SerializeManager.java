@@ -28,6 +28,7 @@ public class SerializeManager {
         private List<SerializeField> normalFields;
         private SerializeField idField;
         private SerializeId idInfo;
+        private String tableName;
     }
 
     private static class SerializeField {
@@ -58,8 +59,9 @@ public class SerializeManager {
 
     private static Map<Class<?>, SerializeMeta> META_MAP = new HashMap<>();
 
-    private static SerializeMeta getSerializeMeta(Class<?> clazz) throws Exception {
+    private static SerializeMeta getSerializeMeta(Class<?> clazz, SerializeBean sbeanInfo) throws Exception {
         SerializeMeta meta = new SerializeMeta();
+        meta.tableName = sbeanInfo.value();
         Set<String> columnNames = new HashSet<>();
         List<SerializeField> normalFields = new LinkedList<>();
         SerializeField idField = null;
@@ -103,7 +105,7 @@ public class SerializeManager {
             if (columnName == null || columnName.isEmpty()) {
                 columnName = fieldName;
             }
-            columnName = StringUtil.camel2underline(columnName);
+            columnName = sbeanInfo.camel2underline() ? StringUtil.camel2underline(columnName) : columnName;
             if (columnNames.contains(columnName)) {
                 throw new RepositoryException("Duplicated column '" + columnName + "' in " + clazz);
             }
@@ -219,7 +221,11 @@ public class SerializeManager {
         Reflections reflections = packageName != null ? new Reflections(packageName) : new Reflections();
         Set<Class<?>> classes = reflections.getTypesAnnotatedWith(SerializeBean.class);
         for (Class<?> clazz : classes) {
-            META_MAP.put(clazz, getSerializeMeta(clazz));
+            SerializeBean sbeanInfo = clazz.getAnnotation(SerializeBean.class);
+            if (sbeanInfo == null) {
+                continue;
+            }
+            META_MAP.put(clazz, getSerializeMeta(clazz, sbeanInfo));
         }
     }
 
@@ -252,6 +258,7 @@ public class SerializeManager {
             throw new RepositoryException(bean.getClass() + " is not annotated with SerializeBean");
         }
         SerializeDoc sdoc = new SerializeDoc();
+        sdoc.setTableName(meta.tableName);
         Object id = null;
         boolean update = false;
         if (meta.idField != null) {

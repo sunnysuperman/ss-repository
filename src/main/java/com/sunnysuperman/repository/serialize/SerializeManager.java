@@ -17,6 +17,7 @@ import java.util.Set;
 import org.reflections.Reflections;
 
 import com.sunnysuperman.commons.bean.Bean;
+import com.sunnysuperman.commons.bean.ParseBeanOptions;
 import com.sunnysuperman.commons.util.FormatUtil;
 import com.sunnysuperman.commons.util.StringUtil;
 import com.sunnysuperman.repository.InsertUpdate;
@@ -340,8 +341,8 @@ public class SerializeManager {
         return serialize(bean, null, insertUpdate);
     }
 
-    private static boolean setPropertyValue(Object object, SerializeField sfield, Map<String, Object> doc)
-            throws Exception {
+    private static boolean setPropertyValue(Object object, SerializeField sfield, Map<String, Object> doc,
+            ParseBeanOptions options, LinkedList<String> contextKeys) throws Exception {
         Object value = doc.get(sfield.columnName);
         if (value == null) {
             return false;
@@ -360,24 +361,27 @@ public class SerializeManager {
                     pType = (ParameterizedType) type;
                 }
             }
-            value = Bean.parse(value, destClass, pType, null, null);
+            value = Bean.parse(value, destClass, pType, options, contextKeys);
             sfield.writeMethod.invoke(object, value);
         }
         return true;
     }
 
-    public static <T> T deserialize(Map<String, Object> doc, Class<T> clazz) throws RepositoryException {
+    public static <T> T deserialize(Map<String, Object> doc, Class<T> clazz, ParseBeanOptions options)
+            throws RepositoryException {
         SerializeMeta meta = META_MAP.get(clazz);
         if (meta == null) {
             throw new RepositoryException(clazz + " is not annotated with SerializeBean");
         }
         try {
             T object = clazz.newInstance();
+            LinkedList<String> contextKeys = options != null && options.isInjectContext() ? new LinkedList<String>()
+                    : null;
             for (SerializeField sfield : meta.normalFields) {
-                setPropertyValue(object, sfield, doc);
+                setPropertyValue(object, sfield, doc, options, contextKeys);
             }
             if (meta.idField != null) {
-                setPropertyValue(object, meta.idField, doc);
+                setPropertyValue(object, meta.idField, doc, options, contextKeys);
             }
             return object;
         } catch (RepositoryException ex) {
@@ -386,4 +390,9 @@ public class SerializeManager {
             throw new RepositoryException(ex);
         }
     }
+
+    public static <T> T deserialize(Map<String, Object> doc, Class<T> clazz) {
+        return deserialize(doc, clazz, null);
+    }
+
 }

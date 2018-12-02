@@ -8,16 +8,16 @@ import com.sunnysuperman.commons.bean.Bean;
 import com.sunnysuperman.commons.bean.ParseBeanOptions;
 import com.sunnysuperman.commons.util.StringUtil;
 
-public class SimpleBeanDBRowMapper<T> implements DBRowMapper<T> {
+public class SimpleBeanDBMapper<T> implements DBMapper<T> {
     private Class<T> clazz;
     private ParseBeanOptions options;
 
-    public SimpleBeanDBRowMapper(Class<T> clazz) {
+    public SimpleBeanDBMapper(Class<T> clazz) {
         super();
         this.clazz = clazz;
     }
 
-    public SimpleBeanDBRowMapper(Class<T> clazz, ParseBeanOptions options) {
+    public SimpleBeanDBMapper(Class<T> clazz, ParseBeanOptions options) {
         super();
         this.clazz = clazz;
         this.options = options;

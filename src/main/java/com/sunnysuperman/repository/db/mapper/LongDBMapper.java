@@ -3,10 +3,10 @@ package com.sunnysuperman.repository.db.mapper;
 import java.util.Map;
 
 import com.sunnysuperman.commons.util.FormatUtil;
-import com.sunnysuperman.repository.db.mapper.DBRowMapper;
+import com.sunnysuperman.repository.db.mapper.DBMapper;
 
-public class LongDBRowMapper implements DBRowMapper<Long> {
-    private LongDBRowMapper() {
+public class LongDBMapper implements DBMapper<Long> {
+    private LongDBMapper() {
     }
 
     @Override
@@ -17,9 +17,9 @@ public class LongDBRowMapper implements DBRowMapper<Long> {
         return FormatUtil.parseLong(doc.values().iterator().next());
     }
 
-    private static final LongDBRowMapper INSTANCE = new LongDBRowMapper();
+    private static final LongDBMapper INSTANCE = new LongDBMapper();
 
-    public static final LongDBRowMapper getInstance() {
+    public static final LongDBMapper getInstance() {
         return INSTANCE;
     }
 

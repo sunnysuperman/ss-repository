@@ -18,12 +18,13 @@ import com.sunnysuperman.commons.model.Pagination;
 import com.sunnysuperman.commons.model.PullPagination;
 import com.sunnysuperman.commons.util.FormatUtil;
 import com.sunnysuperman.commons.util.JSONUtil;
+import com.sunnysuperman.commons.util.StringUtil;
 import com.sunnysuperman.repository.InsertUpdate;
 import com.sunnysuperman.repository.RepositoryException;
 import com.sunnysuperman.repository.SaveResult;
-import com.sunnysuperman.repository.db.mapper.DBRowMapper;
+import com.sunnysuperman.repository.db.mapper.DBMapper;
 import com.sunnysuperman.repository.serialize.SerializeDoc;
-import com.sunnysuperman.repository.serialize.SerializeManager;
+import com.sunnysuperman.repository.serialize.Serializer;
 
 public abstract class DBRepository {
 
@@ -63,7 +64,7 @@ public abstract class DBRepository {
     }
 
     protected String convertColumnName(String columnName) {
-        return columnName;
+        return StringUtil.camel2underline(columnName);
     }
 
     protected String getInsertDialect(Map<String, ?> kv, String tableName, List<Object> params, boolean ignore) {
@@ -291,10 +292,10 @@ public abstract class DBRepository {
         return inserted ? InsertUpdate.INSERT : null;
     }
 
-    public <T> SaveResult save(T bean, Set<String> fields, InsertUpdate insertUpdate, SerializeDocWrapper<T> wrapper) {
+    public <T> SaveResult save(T bean, Set<String> fields, InsertUpdate insertUpdate, SerializeWrapper<T> wrapper) {
         SerializeDoc sdoc;
         try {
-            sdoc = SerializeManager.serialize(bean, fields, insertUpdate);
+            sdoc = Serializer.serialize(bean, fields, insertUpdate);
         } catch (Exception ex) {
             throw new RepositoryException(ex);
         }
@@ -304,18 +305,8 @@ public abstract class DBRepository {
         if (wrapper != null) {
             doc = wrapper.wrap(doc, bean);
         }
-        if (sdoc.getIdValues() != null) {
-            boolean updated = updateDoc(tableName, doc, sdoc.getIdColumns(), sdoc.getIdValues()) > 0;
-            if (!updated && sdoc.isUpsert()) {
-                for (int i = 0; i < sdoc.getIdColumns().length; i++) {
-                    doc.put(sdoc.getIdColumns()[i], sdoc.getIdValues()[i]);
-                }
-                boolean inserted = insertDoc(tableName, doc);
-                result.setInserted(inserted);
-            } else {
-                result.setUpdated(updated);
-            }
-        } else {
+        // insert only
+        if (insertUpdate == InsertUpdate.INSERT) {
             Class<? extends Number> idIncrementClass = sdoc.getIdIncrementClass();
             Number id;
             if (idIncrementClass != null) {
@@ -325,40 +316,65 @@ public abstract class DBRepository {
                 }
                 result.setInserted(true);
                 result.setGeneratedId(id);
-                SerializeManager.setIncrementId(bean, id);
+                Serializer.setIncrementId(bean, id);
             } else {
                 boolean inserted = insertDoc(tableName, doc);
                 result.setInserted(inserted);
             }
+            return result;
         }
+        // update
+        if (sdoc.getIdValues() == null) {
+            throw new RepositoryException("Require id to update");
+        }
+        boolean updated = updateDoc(tableName, doc, sdoc.getIdColumns(), sdoc.getIdValues()) > 0;
+        if (updated || insertUpdate == InsertUpdate.UPDATE) {
+            result.setUpdated(updated);
+            return result;
+        }
+        // upsert
+        Map<String, Object> upsertDoc = sdoc.getUpsertDoc();
+        if (wrapper != null) {
+            upsertDoc = wrapper.wrap(upsertDoc, bean);
+        }
+        boolean inserted = insertDoc(tableName, upsertDoc);
+        result.setInserted(inserted);
         return result;
     }
 
     public SaveResult save(Object bean) {
-        return save(bean, null, InsertUpdate.RUNTIME, null);
+        return save(bean, null, InsertUpdate.UPSERT, null);
     }
 
-    public <T> SaveResult save(T bean, SerializeDocWrapper<T> wrapper) {
-        return save(bean, null, InsertUpdate.RUNTIME, wrapper);
+    public <T> SaveResult save(T bean, SerializeWrapper<T> wrapper) {
+        return save(bean, null, InsertUpdate.UPSERT, wrapper);
     }
 
     public Object insert(Object bean) {
         return save(bean, null, InsertUpdate.INSERT, null).getGeneratedId();
     }
 
-    public <T> Object insert(T bean, SerializeDocWrapper<T> wrapper) {
+    public <T> Object insert(T bean, SerializeWrapper<T> wrapper) {
         return save(bean, null, InsertUpdate.INSERT, wrapper).getGeneratedId();
+    }
+
+    public boolean update(Object bean) {
+        return save(bean, null, InsertUpdate.UPDATE, null).isUpdated();
     }
 
     public boolean update(Object bean, Set<String> fields) {
         return save(bean, fields, InsertUpdate.UPDATE, null).isUpdated();
     }
 
-    public <T> boolean update(T bean, Set<String> fields, SerializeDocWrapper<T> wrapper) {
+    public <T> boolean update(T bean, SerializeWrapper<T> wrapper) {
+        return save(bean, null, InsertUpdate.UPDATE, wrapper).isUpdated();
+    }
+
+    public <T> boolean update(T bean, Set<String> fields, SerializeWrapper<T> wrapper) {
         return save(bean, fields, InsertUpdate.UPDATE, wrapper).isUpdated();
     }
 
-    public <T> T query(String sql, Object[] params, DBRowMapper<T> mapper) {
+    public <T> T find(String sql, Object[] params, DBMapper<T> mapper) {
         List<Map<String, Object>> rawItems = getJdbcTemplate().queryForList(getPaginationDialect(sql, 0, 1), params);
         if (rawItems.isEmpty()) {
             return null;
@@ -367,7 +383,7 @@ public abstract class DBRepository {
         return mapper.map(rawItem);
     }
 
-    public <T> List<T> queryForList(String sql, Object[] params, int offset, int limit, DBRowMapper<T> mapper) {
+    public <T> List<T> findForList(String sql, Object[] params, int offset, int limit, DBMapper<T> mapper) {
         List<Map<String, Object>> rawItems = getJdbcTemplate().queryForList(getPaginationDialect(sql, offset, limit),
                 params);
         if (rawItems.isEmpty()) {
@@ -381,7 +397,7 @@ public abstract class DBRepository {
         return items;
     }
 
-    public <T> Set<T> queryForSet(String sql, Object[] params, int offset, int limit, DBRowMapper<T> mapper) {
+    public <T> Set<T> findForSet(String sql, Object[] params, int offset, int limit, DBMapper<T> mapper) {
         List<Map<String, Object>> rawItems = getJdbcTemplate().queryForList(getPaginationDialect(sql, offset, limit),
                 params);
         if (rawItems.isEmpty()) {
@@ -395,9 +411,8 @@ public abstract class DBRepository {
         return items;
     }
 
-    public <T> Pagination<T> queryForPagination(String sql, Object[] params, int offset, int limit,
-            DBRowMapper<T> mapper) {
-        List<T> items = queryForList(sql, params, offset, limit, mapper);
+    public <T> Pagination<T> findForPagination(String sql, Object[] params, int offset, int limit, DBMapper<T> mapper) {
+        List<T> items = findForList(sql, params, offset, limit, mapper);
         int size = items.size();
         if (size == 0) {
             return Pagination.emptyInstance(limit);
@@ -408,8 +423,8 @@ public abstract class DBRepository {
         return new Pagination<T>(items, size, offset, limit);
     }
 
-    public <T> PullPagination<T> queryForPullPagination(String sql, Object[] params, String marker, int limit,
-            DBRowMapper<T> mapper) {
+    public <T> PullPagination<T> findForPullPagination(String sql, Object[] params, String marker, int limit,
+            DBMapper<T> mapper) {
         int offset = marker == null ? 0 : Integer.parseInt(marker);
         List<Map<String, Object>> rawItems = getJdbcTemplate()
                 .queryForList(getPaginationDialect(sql, offset, limit + 1), params);
@@ -429,14 +444,14 @@ public abstract class DBRepository {
         return PullPagination.newInstance(items, String.valueOf(newOffset), hasMore);
     }
 
-    public <T> T queryByKey(String table, String selectKeys, String keyName, Object key, DBRowMapper<T> mapper) {
+    public <T> T findByKey(String table, String selectKeys, String keyName, Object key, DBMapper<T> mapper) {
         StringBuilder sql = new StringBuilder("select ").append(selectKeys != null ? selectKeys : "*").append(" from ")
                 .append(table).append(" where ").append(convertColumnName(keyName)).append("=?");
-        return query(sql.toString(), new Object[] { key }, mapper);
+        return find(sql.toString(), new Object[] { key }, mapper);
     }
 
-    public <T> List<T> queryByKeys(String table, String selectKeys, String keyName, Collection<?> keys,
-            DBRowMapper<T> mapper) {
+    public <T> List<T> findByKeys(String table, String selectKeys, String keyName, Collection<?> keys,
+            DBMapper<T> mapper) {
         StringBuilder sql = new StringBuilder("select ").append(selectKeys != null ? selectKeys : "*").append(" from ")
                 .append(table).append(" where ").append(convertColumnName(keyName)).append(" in(");
         for (int i = 0; i < keys.size(); i++) {
@@ -447,7 +462,7 @@ public abstract class DBRepository {
             }
         }
         sql.append(')');
-        return queryForList(sql.toString(), keys.toArray(new Object[keys.size()]), 0, 0, mapper);
+        return findForList(sql.toString(), keys.toArray(new Object[keys.size()]), 0, 0, mapper);
     }
 
     public int count(String sql, Object[] params) {

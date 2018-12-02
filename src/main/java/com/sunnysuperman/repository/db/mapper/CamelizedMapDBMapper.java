@@ -6,8 +6,8 @@ import java.util.Map.Entry;
 
 import com.sunnysuperman.commons.util.StringUtil;
 
-public class CamelizedMapDBRowMapper implements DBRowMapper<Map<String, Object>> {
-    private CamelizedMapDBRowMapper() {
+public class CamelizedMapDBMapper implements DBMapper<Map<String, Object>> {
+    private CamelizedMapDBMapper() {
     }
 
     @Override
@@ -19,9 +19,9 @@ public class CamelizedMapDBRowMapper implements DBRowMapper<Map<String, Object>>
         return doc;
     }
 
-    private static final CamelizedMapDBRowMapper INSTANCE = new CamelizedMapDBRowMapper();
+    private static final CamelizedMapDBMapper INSTANCE = new CamelizedMapDBMapper();
 
-    public static CamelizedMapDBRowMapper getInstance() {
+    public static CamelizedMapDBMapper getInstance() {
         return INSTANCE;
     }
 

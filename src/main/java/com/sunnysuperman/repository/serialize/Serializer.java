@@ -23,13 +23,13 @@ import com.sunnysuperman.commons.util.StringUtil;
 import com.sunnysuperman.repository.InsertUpdate;
 import com.sunnysuperman.repository.RepositoryException;
 
-public class SerializeManager {
+public class Serializer {
 
-    private static class SerializeMeta {
-        private List<SerializeField> normalFields;
-        private SerializeField idField;
-        private SerializeId idInfo;
-        private String tableName;
+    protected static class SerializeMeta {
+        protected List<SerializeField> normalFields;
+        protected SerializeField idField;
+        protected SerializeId idInfo;
+        protected String tableName;
     }
 
     private static class SerializeField {
@@ -272,20 +272,21 @@ public class SerializeManager {
             case UPDATE:
                 update = true;
                 break;
-            case RUNTIME:
+            case UPSERT:
                 update = id != null;
                 break;
             default:
                 throw new RepositoryException("Unknown InsertUpdate");
             }
         }
+        boolean upsert = false;
         if (update) {
             if (id == null) {
-                throw new RepositoryException("No id set to update");
+                throw new RepositoryException("Require id to update");
             }
             sdoc.setIdValues(new Object[] { id });
-            if (insertUpdate == InsertUpdate.RUNTIME) {
-                sdoc.setUpsert(meta.idInfo.generator() == IdGenerator.PROVIDE);
+            if (insertUpdate == InsertUpdate.UPSERT) {
+                upsert = meta.idInfo.generator() == IdGenerator.PROVIDE;
             }
         } else {
             SerializeId idInfo = meta.idInfo;
@@ -311,6 +312,12 @@ public class SerializeManager {
         }
         Map<String, Object> doc = new HashMap<>();
         sdoc.setDoc(doc);
+        Map<String, Object> upsertDoc = null;
+        if (upsert) {
+            upsertDoc = new HashMap<>();
+            upsertDoc.put(sdoc.getIdColumns()[0], id);
+            sdoc.setUpsertDoc(upsertDoc);
+        }
         for (SerializeField sfield : meta.normalFields) {
             SerializeProperty property = sfield.property;
             if (fields != null) {
@@ -320,6 +327,11 @@ public class SerializeManager {
                 }
             } else {
                 // 根据bean定义的字段插入或更新
+                if (upsert) {
+                    if (property.insertable()) {
+                        upsertDoc.put(sfield.columnName, sfield.getValue(bean));
+                    }
+                }
                 if (update) {
                     if (!property.updatable()) {
                         continue;
@@ -328,8 +340,7 @@ public class SerializeManager {
                     continue;
                 }
             }
-            Object value = sfield.getValue(bean);
-            doc.put(sfield.columnName, value);
+            doc.put(sfield.columnName, sfield.getValue(bean));
         }
         if (!update && id != null) {
             doc.put(sdoc.getIdColumns()[0], id);

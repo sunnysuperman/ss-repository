@@ -1,0 +1,9 @@
+db.jdbcUrl=
+db.user=
+db.password=
+db.initialPoolSize=2
+db.minPoolSize=2
+db.maxPoolSize=2
+db.acquireIncrement=2
+db.acquireRetryAttempts=5
+db.maxIdleTime=600

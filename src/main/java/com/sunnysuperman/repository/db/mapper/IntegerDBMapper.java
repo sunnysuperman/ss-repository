@@ -4,8 +4,8 @@ import java.util.Map;
 
 import com.sunnysuperman.commons.util.FormatUtil;
 
-public class IntegerDBRowMapper implements DBRowMapper<Integer> {
-    private IntegerDBRowMapper() {
+public class IntegerDBMapper implements DBMapper<Integer> {
+    private IntegerDBMapper() {
     }
 
     @Override
@@ -16,9 +16,9 @@ public class IntegerDBRowMapper implements DBRowMapper<Integer> {
         return FormatUtil.parseInteger(doc.values().iterator().next());
     }
 
-    private static final IntegerDBRowMapper INSTANCE = new IntegerDBRowMapper();
+    private static final IntegerDBMapper INSTANCE = new IntegerDBMapper();
 
-    public static final IntegerDBRowMapper getInstance() {
+    public static final IntegerDBMapper getInstance() {
         return INSTANCE;
     }
 

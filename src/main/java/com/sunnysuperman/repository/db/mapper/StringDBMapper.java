@@ -3,11 +3,11 @@ package com.sunnysuperman.repository.db.mapper;
 import java.util.Map;
 
 import com.sunnysuperman.commons.util.FormatUtil;
-import com.sunnysuperman.repository.db.mapper.DBRowMapper;
+import com.sunnysuperman.repository.db.mapper.DBMapper;
 
-public class StringDBRowMapper implements DBRowMapper<String> {
+public class StringDBMapper implements DBMapper<String> {
 
-    private StringDBRowMapper() {
+    private StringDBMapper() {
     }
 
     @Override
@@ -18,9 +18,9 @@ public class StringDBRowMapper implements DBRowMapper<String> {
         return FormatUtil.parseString(doc.values().iterator().next());
     }
 
-    private static final StringDBRowMapper INSTANCE = new StringDBRowMapper();
+    private static final StringDBMapper INSTANCE = new StringDBMapper();
 
-    public static final StringDBRowMapper getInstance() {
+    public static final StringDBMapper getInstance() {
         return INSTANCE;
     }
 

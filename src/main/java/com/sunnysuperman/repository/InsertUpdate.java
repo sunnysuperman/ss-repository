@@ -1,5 +1,5 @@
 package com.sunnysuperman.repository;
 
 public enum InsertUpdate {
-    INSERT, UPDATE, RUNTIME
+    INSERT, UPDATE, UPSERT
 }

@@ -2,8 +2,8 @@ package com.sunnysuperman.repository.db.mapper;
 
 import java.util.Map;
 
-public class PropertyDBRowMapper implements DBRowMapper<Object> {
-    private PropertyDBRowMapper() {
+public class ObjectDBMapper implements DBMapper<Object> {
+    private ObjectDBMapper() {
     }
 
     @Override
@@ -14,9 +14,9 @@ public class PropertyDBRowMapper implements DBRowMapper<Object> {
         return doc.values().iterator().next();
     }
 
-    private static final PropertyDBRowMapper INSTANCE = new PropertyDBRowMapper();
+    private static final ObjectDBMapper INSTANCE = new ObjectDBMapper();
 
-    public static final PropertyDBRowMapper getInstance() {
+    public static final ObjectDBMapper getInstance() {
         return INSTANCE;
     }
 

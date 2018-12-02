@@ -315,7 +315,9 @@ public class Serializer {
         Map<String, Object> upsertDoc = null;
         if (upsert) {
             upsertDoc = new HashMap<>();
-            upsertDoc.put(sdoc.getIdColumns()[0], id);
+            if (id != null) {
+                upsertDoc.put(sdoc.getIdColumns()[0], id);
+            }
             sdoc.setUpsertDoc(upsertDoc);
         }
         for (SerializeField sfield : meta.normalFields) {

@@ -306,7 +306,7 @@ public abstract class DBRepository {
             doc = wrapper.wrap(doc, bean);
         }
         // insert only
-        if (insertUpdate == InsertUpdate.INSERT) {
+        if (insertUpdate == InsertUpdate.INSERT || sdoc.getIdValues() == null) {
             Class<? extends Number> idIncrementClass = sdoc.getIdIncrementClass();
             Number id;
             if (idIncrementClass != null) {

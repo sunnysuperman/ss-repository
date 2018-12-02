@@ -71,6 +71,55 @@ public class DBRepositoryTest extends TestCase {
 
     }
 
+    @SerializeBean(value = "test_device2")
+    public static class Device2 {
+        @SerializeId(generator = IdGenerator.INCREMENT)
+        @SerializeProperty
+        private Integer id;
+
+        @SerializeProperty(updatable = false)
+        private Long createdAt;
+
+        @SerializeProperty
+        private String name;
+
+        @SerializeProperty
+        private String notes;
+
+        public Integer getId() {
+            return id;
+        }
+
+        public void setId(Integer id) {
+            this.id = id;
+        }
+
+        public Long getCreatedAt() {
+            return createdAt;
+        }
+
+        public void setCreatedAt(Long createdAt) {
+            this.createdAt = createdAt;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String getNotes() {
+            return notes;
+        }
+
+        public void setNotes(String notes) {
+            this.notes = notes;
+        }
+
+    }
+
     private static class DefaultDBRepository extends DBRepository {
         private JdbcTemplate jdbcTemplate;
 
@@ -191,6 +240,44 @@ public class DBRepositoryTest extends TestCase {
         }
     }
 
+    public void test_insert_update2() {
+        repository.execute("delete from test_device2", null);
+        repository.execute("alter table test_device2 AUTO_INCREMENT=1000", null);
+
+        BeanDBMapper<Device2> mapper = new BeanDBMapper<>(Device2.class);
+
+        Integer id;
+        // insert 1
+        {
+            String name = "Device name on insert";
+            Device2 device = new Device2();
+            device.setName(name);
+            device.setCreatedAt(System.currentTimeMillis());
+            repository.insert(device);
+            id = device.getId();
+            assertTrue(id != null);
+
+            Device2 found = repository.findByKey("test_device2", null, "id", id, mapper);
+            assertTrue(found.getName().equals(name));
+        }
+
+        // update 1
+        {
+            String name = "Device name on update1";
+            String notes = "notes on update 1";
+            Device2 device = new Device2();
+            device.setId(id);
+            device.setName(name);
+            device.setNotes(notes);
+            assertTrue(repository.update(device));
+
+            Device2 found = repository.findByKey("test_device2", null, "id", id, mapper);
+            assertTrue(found.getName().equals(name));
+            assertTrue(found.getNotes().equals(notes));
+        }
+
+    }
+
     public void test_save() {
         String id = "1000";
         Long createdAt = 123L;
@@ -248,6 +335,70 @@ public class DBRepositoryTest extends TestCase {
             assertTrue(result.isUpdated());
 
             Device found = repository.findByKey("test_device", null, "id", id, mapper);
+            assertTrue(found.getName().equals(name));
+            assertTrue(found.getNotes().equals(notes));
+            assertTrue(found.getCreatedAt().equals(createdAt));
+        }
+    }
+
+    public void test_save2() {
+        repository.execute("delete from test_device2", null);
+        repository.execute("alter table test_device2 AUTO_INCREMENT=1000", null);
+        BeanDBMapper<Device2> mapper = new BeanDBMapper<>(Device2.class);
+
+        Long createdAt = 123L;
+        Integer id;
+        {
+            String name = "name to save";
+            String notes = "notes to save";
+            Device2 device = new Device2();
+            device.setName(name);
+            device.setNotes(notes);
+            device.setCreatedAt(createdAt);
+            SaveResult result = repository.save(device);
+            assertTrue(result.isInserted());
+            id = (Integer) result.getGeneratedId();
+
+            Device2 found = repository.findByKey("test_device2", null, "id", id, mapper);
+            assertTrue(found.getName().equals(name));
+            assertTrue(found.getNotes().equals(notes));
+            assertTrue(found.getCreatedAt().equals(createdAt));
+        }
+
+        {
+            String name = "name to update";
+            Device2 device = new Device2();
+            device.setId(id);
+            device.setName(name);
+            device.setNotes(null);
+            SaveResult result = repository.save(device);
+            assertTrue(result.isUpdated());
+
+            Device2 found = repository.findByKey("test_device2", null, "id", id, mapper);
+            assertTrue(found.getName().equals(name));
+            assertTrue(found.getNotes() == null);
+            assertTrue(found.getCreatedAt().equals(createdAt));
+        }
+
+        {
+            String name = "name to update2";
+            final String notes = "abc";
+            Device2 device = new Device2();
+            device.setId(id);
+            device.setName(name);
+            device.setNotes(null);
+            SaveResult result = repository.save(device, new SerializeWrapper<Device2>() {
+
+                @Override
+                public Map<String, Object> wrap(Map<String, Object> doc, Device2 bean) {
+                    doc.put("notes", notes);
+                    return doc;
+                }
+
+            });
+            assertTrue(result.isUpdated());
+
+            Device2 found = repository.findByKey("test_device2", null, "id", id, mapper);
             assertTrue(found.getName().equals(name));
             assertTrue(found.getNotes().equals(notes));
             assertTrue(found.getCreatedAt().equals(createdAt));

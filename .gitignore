@@ -8,3 +8,5 @@
 
 # virtual machine crash logs
 hs_err_pid*
+
+src/test/resources/com/sunnysuperman/repository/test/db.properties

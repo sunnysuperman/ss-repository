@@ -23,6 +23,7 @@ import com.sunnysuperman.repository.InsertUpdate;
 import com.sunnysuperman.repository.RepositoryException;
 import com.sunnysuperman.repository.SaveResult;
 import com.sunnysuperman.repository.db.mapper.DBMapper;
+import com.sunnysuperman.repository.serialize.SerializeBean;
 import com.sunnysuperman.repository.serialize.SerializeDoc;
 import com.sunnysuperman.repository.serialize.Serializer;
 
@@ -292,6 +293,14 @@ public abstract class DBRepository {
         return inserted ? InsertUpdate.INSERT : null;
     }
 
+    public InsertUpdate saveDoc(String tableName, Map<String, Object> doc, String primaryKey) {
+        return saveDoc(tableName, doc, primaryKey, false);
+    }
+
+    public InsertUpdate saveDoc(String tableName, Map<String, Object> doc) {
+        return saveDoc(tableName, doc, "id", false);
+    }
+
     public <T> SaveResult save(T bean, Set<String> fields, InsertUpdate insertUpdate, SerializeWrapper<T> wrapper) {
         SerializeDoc sdoc;
         try {
@@ -444,6 +453,46 @@ public abstract class DBRepository {
         return PullPagination.newInstance(items, String.valueOf(newOffset), hasMore);
     }
 
+    public StringBuilder getReadSql(Class<?> clazz, String selectKeys) {
+        String table = clazz.getAnnotation(SerializeBean.class).value();
+        StringBuilder sql = new StringBuilder("select ").append(selectKeys != null ? selectKeys : "*").append(" from ")
+                .append(table);
+        return sql;
+    }
+
+    public StringBuilder getReadSql(Class<?> clazz) {
+        return getReadSql(clazz, null);
+    }
+
+    public <T> T findById(Class<?> clazz, Object id, String selectKeys, DBMapper<T> mapper) {
+        StringBuilder sql = getReadSql(clazz, selectKeys).append(" where ").append(Serializer.getIdColumnName(clazz))
+                .append("=?");
+        return find(sql.toString(), new Object[] { id }, mapper);
+    }
+
+    public <T> T findById(Class<?> clazz, Object id, DBMapper<T> mapper) {
+        return findById(clazz, id, null, mapper);
+    }
+
+    public <T> List<T> findByIds(Class<?> clazz, Collection<?> ids, String selectKeys, DBMapper<T> mapper) {
+        String table = clazz.getAnnotation(SerializeBean.class).value();
+        StringBuilder sql = new StringBuilder("select ").append(selectKeys != null ? selectKeys : "*").append(" from ")
+                .append(table).append(" where ").append(Serializer.getIdColumnName(clazz)).append(" in(");
+        for (int i = 0; i < ids.size(); i++) {
+            if (i == 0) {
+                sql.append('?');
+            } else {
+                sql.append(",?");
+            }
+        }
+        sql.append(')');
+        return findForList(sql.toString(), ids.toArray(), 0, 0, mapper);
+    }
+
+    public <T> List<T> findByIds(Class<?> clazz, Collection<?> ids, DBMapper<T> mapper) {
+        return findByIds(clazz, ids, null, mapper);
+    }
+
     public <T> T findByKey(String table, String selectKeys, String keyName, Object key, DBMapper<T> mapper) {
         StringBuilder sql = new StringBuilder("select ").append(selectKeys != null ? selectKeys : "*").append(" from ")
                 .append(table).append(" where ").append(convertColumnName(keyName)).append("=?");
@@ -455,10 +504,10 @@ public abstract class DBRepository {
         StringBuilder sql = new StringBuilder("select ").append(selectKeys != null ? selectKeys : "*").append(" from ")
                 .append(table).append(" where ").append(convertColumnName(keyName)).append(" in(");
         for (int i = 0; i < keys.size(); i++) {
-            if (i > 0) {
-                sql.append(",?");
-            } else {
+            if (i == 0) {
                 sql.append('?');
+            } else {
+                sql.append(",?");
             }
         }
         sql.append(')');
@@ -468,6 +517,28 @@ public abstract class DBRepository {
     public int count(String sql, Object[] params) {
         Integer val = getJdbcTemplate().queryForObject(sql, params, Integer.class);
         return FormatUtil.parseIntValue(val, 0);
+    }
+
+    public boolean removeById(Class<?> clazz, Object id) {
+        String table = clazz.getAnnotation(SerializeBean.class).value();
+        StringBuilder sql = new StringBuilder("delete from ").append(table).append(" where ")
+                .append(Serializer.getIdColumnName(clazz)).append("=?");
+        return execute(sql.toString(), new Object[] { id }) > 0;
+    }
+
+    public int removeByIds(Class<?> clazz, Collection<?> ids) {
+        String table = clazz.getAnnotation(SerializeBean.class).value();
+        StringBuilder sql = new StringBuilder("delete from ").append(table).append(" where ")
+                .append(Serializer.getIdColumnName(clazz)).append(" in(");
+        for (int i = 0; i < ids.size(); i++) {
+            if (i == 0) {
+                sql.append('?');
+            } else {
+                sql.append(",?");
+            }
+        }
+        sql.append(')');
+        return execute(sql.toString(), ids.toArray());
     }
 
     public int removeByKey(String table, String keyName, Object key) {
@@ -480,10 +551,10 @@ public abstract class DBRepository {
         StringBuilder sql = new StringBuilder("delete from ").append(table).append(" where ")
                 .append(convertColumnName(keyName)).append(" in(");
         for (int i = 0; i < keys.size(); i++) {
-            if (i > 0) {
-                sql.append(",?");
-            } else {
+            if (i == 0) {
                 sql.append('?');
+            } else {
+                sql.append(",?");
             }
         }
         sql.append(')');

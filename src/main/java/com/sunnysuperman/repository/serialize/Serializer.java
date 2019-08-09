@@ -149,7 +149,7 @@ public class Serializer {
         Method method = getIdWriteMethod(relationClass);
         if (method == null) {
             throw new RepositoryException(
-                    readMethod.getClass() + "." + columnName + ": could not get relation write method");
+                    readMethod.getDeclaringClass() + "." + columnName + ": could not get relation write method");
         }
         return method;
     }
@@ -164,7 +164,7 @@ public class Serializer {
         Method method = getIdReadMethod(relationClass);
         if (method == null) {
             throw new RepositoryException(
-                    readMethod.getClass() + "." + columnName + ": could not get relation read method");
+                    readMethod.getDeclaringClass() + "." + columnName + ": could not get relation read method");
         }
         return method;
     }
@@ -252,12 +252,17 @@ public class Serializer {
         }
     }
 
+    private static SerializeMeta getSerializeMeta(Class<?> clazz) {
+        SerializeMeta meta = META_MAP.get(clazz);
+        if (meta == null) {
+            throw new RepositoryException(clazz + " is not annotated with SerializeBean");
+        }
+        return meta;
+    }
+
     public static SerializeDoc serialize(Object bean, Set<String> fields, InsertUpdate insertUpdate)
             throws RepositoryException {
-        SerializeMeta meta = META_MAP.get(bean.getClass());
-        if (meta == null) {
-            throw new RepositoryException(bean.getClass() + " is not annotated with SerializeBean");
-        }
+        SerializeMeta meta = getSerializeMeta(bean.getClass());
         SerializeDoc sdoc = new SerializeDoc();
         sdoc.setTableName(meta.tableName);
         Object id = null;
@@ -382,10 +387,7 @@ public class Serializer {
 
     public static <T> T deserialize(Map<String, Object> doc, Class<T> clazz, ParseBeanOptions options)
             throws RepositoryException {
-        SerializeMeta meta = META_MAP.get(clazz);
-        if (meta == null) {
-            throw new RepositoryException(clazz + " is not annotated with SerializeBean");
-        }
+        SerializeMeta meta = getSerializeMeta(clazz);
         try {
             T object = clazz.newInstance();
             LinkedList<String> contextKeys = options != null && options.isInjectContext() ? new LinkedList<String>()
@@ -408,4 +410,17 @@ public class Serializer {
         return deserialize(doc, clazz, null);
     }
 
+    public static String getIdColumnName(Class<?> clazz) {
+        SerializeMeta meta = getSerializeMeta(clazz);
+        return meta.idField.columnName;
+    }
+
+    public static Object getIdValue(Object object) {
+        SerializeMeta meta = getSerializeMeta(object.getClass());
+        return meta.idField.getValue(object);
+    }
+
+    public static String getTable(Class<?> clazz) {
+        return clazz.getAnnotation(SerializeBean.class).value();
+    }
 }

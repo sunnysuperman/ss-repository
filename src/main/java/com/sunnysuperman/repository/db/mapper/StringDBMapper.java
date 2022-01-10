@@ -3,7 +3,6 @@ package com.sunnysuperman.repository.db.mapper;
 import java.util.Map;
 
 import com.sunnysuperman.commons.util.FormatUtil;
-import com.sunnysuperman.repository.db.mapper.DBMapper;
 
 public class StringDBMapper implements DBMapper<String> {
 

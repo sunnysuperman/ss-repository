@@ -42,15 +42,23 @@ public class Serializer {
         private Method relationReadMethod;
         private SerializeProperty property;
 
-        public Object getValue(Object bean) {
+        public Object getRawValue(Object entity) {
             try {
-                Object value = readMethod.invoke(bean);
-                if (value == null) {
-                    return null;
-                }
-                if (property.relation() == Relation.NONE) {
-                    return value;
-                }
+                return readMethod.invoke(entity);
+            } catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
+                throw new RepositoryException(e);
+            }
+        }
+
+        public Object getValue(Object entity) {
+            Object value = getRawValue(entity);
+            if (value == null) {
+                return null;
+            }
+            if (property.relation() == Relation.NONE) {
+                return value;
+            }
+            try {
                 return relationReadMethod.invoke(value);
             } catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
                 throw new RepositoryException(e);
@@ -410,17 +418,46 @@ public class Serializer {
         return deserialize(doc, clazz, null);
     }
 
+    public static String getTable(Class<?> clazz) {
+        return clazz.getAnnotation(SerializeBean.class).value();
+    }
+
+    public static String getColumnName(Class<?> clazz, String fieldName) {
+        SerializeField field = getField(clazz, fieldName);
+        return field.columnName;
+    }
+
     public static String getIdColumnName(Class<?> clazz) {
         SerializeMeta meta = getSerializeMeta(clazz);
         return meta.idField.columnName;
     }
 
-    public static Object getIdValue(Object object) {
-        SerializeMeta meta = getSerializeMeta(object.getClass());
-        return meta.idField.getValue(object);
+    private static SerializeField getField(Class<?> clazz, String fieldName) {
+        SerializeMeta meta = getSerializeMeta(clazz);
+        if (fieldName.equals(meta.idField.fieldName)) {
+            return meta.idField;
+        }
+        for (SerializeField sfield : meta.normalFields) {
+            if (sfield.fieldName.equals(fieldName)) {
+                return sfield;
+            }
+        }
+        throw new RepositoryException("Could not find field: " + fieldName);
     }
 
-    public static String getTable(Class<?> clazz) {
-        return clazz.getAnnotation(SerializeBean.class).value();
+    public static Object getFieldRawValue(Object entity, String fieldName) {
+        SerializeField field = getField(entity.getClass(), fieldName);
+        return field.getRawValue(entity);
     }
+
+    public static Object getFieldValue(Object entity, String fieldName) {
+        SerializeField field = getField(entity.getClass(), fieldName);
+        return field.getValue(entity);
+    }
+
+    public static Object getIdValue(Object entity) {
+        SerializeMeta meta = getSerializeMeta(entity.getClass());
+        return meta.idField.getValue(entity);
+    }
+
 }

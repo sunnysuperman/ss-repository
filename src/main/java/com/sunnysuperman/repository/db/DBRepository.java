@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 
@@ -23,6 +24,8 @@ import com.sunnysuperman.repository.InsertUpdate;
 import com.sunnysuperman.repository.RepositoryException;
 import com.sunnysuperman.repository.SaveResult;
 import com.sunnysuperman.repository.db.mapper.DBMapper;
+import com.sunnysuperman.repository.db.mapper.MapDBMapper;
+import com.sunnysuperman.repository.db.mapper.ObjectDBMapper;
 import com.sunnysuperman.repository.serialize.SerializeBean;
 import com.sunnysuperman.repository.serialize.SerializeDoc;
 import com.sunnysuperman.repository.serialize.Serializer;
@@ -112,20 +115,15 @@ public abstract class DBRepository {
     }
 
     protected String getCountDialect(String sql) {
-        int index1 = sql.indexOf("from");
-        if (index1 <= 0) {
-            throw new RuntimeException("Bad sql: " + sql);
-        }
-        int index2 = sql.indexOf(" order by", index1);
-        if (index2 < 0) {
-            index2 = sql.length();
-        }
-        StringBuilder buf = new StringBuilder("select count(*) ").append(sql.substring(index1, index2));
-        return buf.toString();
+        return SqlUtils.getCountDialect(sql);
     }
 
     public int execute(String sql, Object[] params) {
         return getJdbcTemplate().update(sql, serializeParams(params));
+    }
+
+    public int execute(String sql, Object[] params, int limit) {
+        return execute(sql + " limit " + limit, params);
     }
 
     public int[] batchExecute(String sql, List<Object[]> batchParams) {
@@ -213,6 +211,51 @@ public abstract class DBRepository {
             paramsList.add(params);
         }
         getJdbcTemplate().batchUpdate(sql, paramsList);
+    }
+
+    public <T> boolean insertIfNotExists(T entity) {
+        return insertIfNotExists(entity, null);
+    }
+
+    public <T> boolean insertIfNotExists(T entity, SerializeWrapper<T> wrapper) {
+        try {
+            insert(entity, wrapper);
+            return true;
+        } catch (DuplicateKeyException e) {
+            // ignore
+            return false;
+        }
+    }
+
+    public <T> boolean insertIfNotExists(String table, Map<String, Object> doc) {
+        try {
+            insertDoc(table, doc);
+            return true;
+        } catch (DuplicateKeyException e) {
+            // ignore
+            return false;
+        }
+    }
+
+    public <T> void batchInsert(List<T> items, SerializeWrapper<T> wrapper) {
+        if (items.size() == 1) {
+            insert(items.get(0), wrapper);
+            return;
+        }
+        List<Map<String, Object>> docs = new ArrayList<>(items.size());
+        for (T item : items) {
+            Map<String, Object> doc = Serializer.serialize(item, InsertUpdate.INSERT).getDoc();
+            if (wrapper != null) {
+                doc = wrapper.wrap(doc, item);
+            }
+            docs.add(doc);
+        }
+        String tableName = Serializer.getTable(items.get(0).getClass());
+        insertDocs(tableName, docs);
+    }
+
+    public <T> void batchInsert(List<T> items) {
+        batchInsert(items, null);
     }
 
     public int updateDoc(String tableName, Map<String, ?> doc, String[] keys, Object[] values) {
@@ -432,6 +475,19 @@ public abstract class DBRepository {
         return new Pagination<T>(items, size, offset, limit);
     }
 
+    public <T> Pagination<T> findForPagination(String sql, String countSql, Object[] params, int offset, int limit,
+            DBMapper<T> mapper) {
+        List<T> items = findForList(sql, params, offset, limit, mapper);
+        int size = items.size();
+        if (size == 0) {
+            return Pagination.emptyInstance(limit);
+        }
+        if (offset != 0 || size == limit) {
+            size = count(countSql != null ? countSql : getCountDialect(sql), params);
+        }
+        return new Pagination<T>(items, size, offset, limit);
+    }
+
     public <T> PullPagination<T> findForPullPagination(String sql, Object[] params, String marker, int limit,
             DBMapper<T> mapper) {
         int offset = marker == null ? 0 : Integer.parseInt(marker);
@@ -451,6 +507,28 @@ public abstract class DBRepository {
         }
         int newOffset = offset + limit;
         return PullPagination.newInstance(items, String.valueOf(newOffset), hasMore);
+    }
+
+    public <T> PullPagination<T> findForPullPagination(String sql, Object[] params, int limit, DBMapper<T> mapper,
+            String markerKey) {
+        List<Map<String, Object>> rawItems = findForList(sql, params, 0, limit + 1, MapDBMapper.getInstance());
+        if (rawItems.isEmpty()) {
+            return PullPagination.emptyInstance();
+        }
+        List<T> items = new ArrayList<>(Math.min(limit, rawItems.size()));
+        boolean hasMore = rawItems.size() > limit;
+        String newMarker = null;
+        if (hasMore) {
+            newMarker = rawItems.get(limit - 1).get(markerKey).toString();
+        }
+        for (Map<String, Object> rawItem : rawItems) {
+            T item = mapper.map(rawItem);
+            items.add(item);
+            if (items.size() >= limit) {
+                break;
+            }
+        }
+        return PullPagination.newInstance(items, newMarker, hasMore);
     }
 
     public StringBuilder getReadSql(Class<?> clazz, String selectKeys) {
@@ -517,6 +595,35 @@ public abstract class DBRepository {
     public int count(String sql, Object[] params) {
         Integer val = getJdbcTemplate().queryForObject(sql, params, Integer.class);
         return FormatUtil.parseIntValue(val, 0);
+    }
+
+    public boolean exists(String sql, Object[] params) {
+        return find(sql, params, ObjectDBMapper.getInstance()) != null;
+    }
+
+    public boolean existsById(Class<?> clazz, Object id) {
+        String table = clazz.getAnnotation(SerializeBean.class).value();
+        String sql = new StringBuilder("select 1 from ").append(table).append(" where ")
+                .append(Serializer.getIdColumnName(clazz)).append("=?").toString();
+        return find(sql, new Object[] { id }, ObjectDBMapper.getInstance()) != null;
+    }
+
+    public boolean deleteById(Class<?> clazz, Object id) {
+        String table = clazz.getAnnotation(SerializeBean.class).value();
+        StringBuilder sql = new StringBuilder("delete from ").append(table).append(" where ")
+                .append(Serializer.getIdColumnName(clazz)).append("=?");
+        return execute(sql.toString(), new Object[] { id }) > 0;
+    }
+
+    public int deleteByIds(Class<?> clazz, Collection<?> ids) {
+        if (ids.size() == 1) {
+            return deleteById(clazz, ids.iterator().next()) ? 1 : 0;
+        }
+        String table = clazz.getAnnotation(SerializeBean.class).value();
+        StringBuilder sql = new StringBuilder("delete from ").append(table).append(" where ")
+                .append(Serializer.getIdColumnName(clazz)).append(" in");
+        SqlUtils.appendInClause(sql, ids);
+        return execute(sql.toString(), ids.toArray());
     }
 
     public boolean removeById(Class<?> clazz, Object id) {

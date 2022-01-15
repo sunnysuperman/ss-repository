@@ -42,7 +42,7 @@ public class Serializer {
         private Method relationReadMethod;
         private SerializeProperty property;
 
-        public Object getRawValue(Object entity) {
+        public Object getFieldValue(Object entity) {
             try {
                 return readMethod.invoke(entity);
             } catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
@@ -50,8 +50,8 @@ public class Serializer {
             }
         }
 
-        public Object getValue(Object entity) {
-            Object value = getRawValue(entity);
+        public Object getColumnValue(Object entity) {
+            Object value = getFieldValue(entity);
             if (value == null) {
                 return null;
             }
@@ -277,7 +277,7 @@ public class Serializer {
         boolean update = false;
         if (meta.idField != null) {
             sdoc.setIdColumns(new String[] { meta.idField.columnName });
-            id = meta.idField.getValue(bean);
+            id = meta.idField.getColumnValue(bean);
             switch (insertUpdate) {
             case INSERT:
                 update = false;
@@ -344,7 +344,7 @@ public class Serializer {
                 // 根据bean定义的字段插入或更新
                 if (upsert) {
                     if (property.insertable()) {
-                        upsertDoc.put(sfield.columnName, sfield.getValue(bean));
+                        upsertDoc.put(sfield.columnName, sfield.getColumnValue(bean));
                     }
                 }
                 if (update) {
@@ -355,7 +355,7 @@ public class Serializer {
                     continue;
                 }
             }
-            doc.put(sfield.columnName, sfield.getValue(bean));
+            doc.put(sfield.columnName, sfield.getColumnValue(bean));
         }
         if (!update && id != null) {
             doc.put(sdoc.getIdColumns()[0], id);
@@ -445,19 +445,24 @@ public class Serializer {
         throw new RepositoryException("Could not find field: " + fieldName);
     }
 
-    public static Object getFieldRawValue(Object entity, String fieldName) {
-        SerializeField field = getField(entity.getClass(), fieldName);
-        return field.getRawValue(entity);
-    }
-
     public static Object getFieldValue(Object entity, String fieldName) {
         SerializeField field = getField(entity.getClass(), fieldName);
-        return field.getValue(entity);
+        return field.getFieldValue(entity);
     }
 
-    public static Object getIdValue(Object entity) {
+    public static Object getIdFieldValue(Object entity) {
         SerializeMeta meta = getSerializeMeta(entity.getClass());
-        return meta.idField.getValue(entity);
+        return meta.idField.getFieldValue(entity);
+    }
+
+    public static Object getColumnValue(Object entity, String fieldName) {
+        SerializeField field = getField(entity.getClass(), fieldName);
+        return field.getColumnValue(entity);
+    }
+
+    public static Object getIdColumnValue(Object entity) {
+        SerializeMeta meta = getSerializeMeta(entity.getClass());
+        return meta.idField.getColumnValue(entity);
     }
 
 }

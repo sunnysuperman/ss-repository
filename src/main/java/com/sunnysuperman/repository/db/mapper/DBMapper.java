@@ -4,6 +4,6 @@ import java.util.Map;
 
 public interface DBMapper<T> {
 
-    T map(Map<String, Object> row);
+	T map(Map<String, Object> row);
 
 }

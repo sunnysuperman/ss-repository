@@ -6,21 +6,21 @@ import com.sunnysuperman.commons.util.FormatUtil;
 
 public class StringDBMapper implements DBMapper<String> {
 
-    private StringDBMapper() {
-    }
+	private StringDBMapper() {
+	}
 
-    @Override
-    public String map(Map<String, Object> doc) {
-        if (doc.isEmpty()) {
-            return null;
-        }
-        return FormatUtil.parseString(doc.values().iterator().next());
-    }
+	@Override
+	public String map(Map<String, Object> doc) {
+		if (doc.isEmpty()) {
+			return null;
+		}
+		return FormatUtil.parseString(doc.values().iterator().next());
+	}
 
-    private static final StringDBMapper INSTANCE = new StringDBMapper();
+	private static final StringDBMapper INSTANCE = new StringDBMapper();
 
-    public static final StringDBMapper getInstance() {
-        return INSTANCE;
-    }
+	public static final StringDBMapper getInstance() {
+		return INSTANCE;
+	}
 
 }

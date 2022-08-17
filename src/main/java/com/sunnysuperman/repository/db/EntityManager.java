@@ -10,12 +10,15 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
-import org.reflections.Reflections;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.sunnysuperman.commons.util.StringUtil;
+import com.sunnysuperman.repository.ClassFinder;
+import com.sunnysuperman.repository.ClassFinder.ClassFilter;
 import com.sunnysuperman.repository.FieldConverter;
 import com.sunnysuperman.repository.InsertUpdate;
 import com.sunnysuperman.repository.RepositoryException;
@@ -29,6 +32,16 @@ import com.sunnysuperman.repository.annotation.Table;
 
 public class EntityManager {
 	private static final Logger LOG = LoggerFactory.getLogger(EntityManager.class);
+	private static Map<Class<?>, EntityMeta> META_MAP = new ConcurrentHashMap<>();
+
+	private static class EntityClassFilter implements ClassFilter {
+
+		@Override
+		public boolean filter(Class<?> clazz) {
+			return clazz.isAnnotationPresent(Entity.class);
+		}
+
+	}
 
 	protected static class EntityMeta {
 		protected List<EntityField> normalFields;
@@ -133,7 +146,7 @@ public class EntityManager {
 			if (relationField != null) {
 				return relationField;
 			}
-			EntityMeta meta = META_MAP.get(field.getType());
+			EntityMeta meta = getEntityMetaOf(field.getType());
 			if (meta == null) {
 				throw new RepositoryException(field.getType() + " is not registered");
 			}
@@ -154,9 +167,10 @@ public class EntityManager {
 		}
 	}
 
-	private static Map<Class<?>, EntityMeta> META_MAP = new HashMap<>();
-
 	private static EntityMeta makeSerializeMeta(Class<?> clazz, Entity entity) throws Exception {
+		if (entity == null) {
+			throw new RepositoryException(clazz + " is not annotated with Entity");
+		}
 		EntityMeta meta = new EntityMeta();
 		Table table = clazz.getAnnotation(Table.class);
 		if (table == null) {
@@ -222,30 +236,39 @@ public class EntityManager {
 		return meta;
 	}
 
-	private static EntityMeta getEntityMetaByType(Class<?> type) {
-		EntityMeta meta = META_MAP.get(type);
-		if (meta == null) {
-			throw new RepositoryException(type + " is not annotated with Entity");
+	public static void scan(String packageName) throws Exception {
+		long t1 = System.nanoTime();
+		Set<Class<?>> classes = ClassFinder.find(packageName, new EntityClassFilter());
+		for (Class<?> clazz : classes) {
+			loadEntity(clazz);
 		}
+		if (LOG.isInfoEnabled()) {
+			long t2 = System.nanoTime();
+			LOG.info("Entity scanning for package {} took {}ms, {} entities found", packageName,
+					TimeUnit.NANOSECONDS.toMillis(t2 - t1), classes.size());
+		}
+	}
+
+	private static EntityMeta loadEntity(Class<?> clazz) throws Exception {
+		Entity entity = clazz.getAnnotation(Entity.class);
+		EntityMeta meta = makeSerializeMeta(clazz, entity);
+		META_MAP.put(clazz, meta);
 		return meta;
 	}
 
-	public static void scan(String packageName) throws Exception {
-		if (LOG.isInfoEnabled()) {
-			LOG.info("EntityManager scan starts: {}", packageName);
-		}
-		Reflections reflections = packageName != null ? new Reflections(packageName) : new Reflections();
-		Set<Class<?>> classes = reflections.getTypesAnnotatedWith(Entity.class);
-		for (Class<?> clazz : classes) {
-			Entity entity = clazz.getAnnotation(Entity.class);
-			if (entity == null) {
-				continue;
+	private static EntityMeta getEntityMetaOf(Class<?> clazz) {
+		EntityMeta meta = META_MAP.get(clazz);
+		if (meta == null) {
+			LOG.warn("Lazy load entity {}", clazz);
+			try {
+				meta = loadEntity(clazz);
+			} catch (RepositoryException e) {
+				throw e;
+			} catch (Exception e) {
+				throw new RepositoryException(e);
 			}
-			META_MAP.put(clazz, makeSerializeMeta(clazz, entity));
 		}
-		if (LOG.isInfoEnabled()) {
-			LOG.info("EntityManager scan stops, {} entities found", META_MAP.size());
-		}
+		return meta;
 	}
 
 	public static String getTable(Class<?> clazz) {
@@ -259,7 +282,7 @@ public class EntityManager {
 
 	public static SerializedRow serialize(Object entity, Set<String> fields, InsertUpdate insertUpdate,
 			DefautFieldConverter defaultFieldConverter) throws RepositoryException {
-		EntityMeta meta = getEntityMetaByType(entity.getClass());
+		EntityMeta meta = getEntityMetaOf(entity.getClass());
 		SerializedRow row = new SerializedRow();
 		row.setTableName(meta.tableName);
 		Object id = null;
@@ -343,7 +366,7 @@ public class EntityManager {
 
 	public static <T> T deserialize(Map<String, Object> doc, Class<T> type, DefautFieldConverter defaultFieldConverter)
 			throws RepositoryException {
-		EntityMeta meta = getEntityMetaByType(type);
+		EntityMeta meta = getEntityMetaOf(type);
 		try {
 			T entity = type.newInstance();
 			for (EntityField field : meta.normalFields) {
@@ -361,13 +384,13 @@ public class EntityManager {
 	}
 
 	public static String getIdColumnName(Class<?> clazz) {
-		EntityMeta meta = getEntityMetaByType(clazz);
+		EntityMeta meta = getEntityMetaOf(clazz);
 		return meta.idField.columnName;
 	}
 
 	public static Object setEntityId(Object entity, Object id, DefautFieldConverter defaultFieldConverter)
 			throws RepositoryException {
-		EntityMeta meta = getEntityMetaByType(entity.getClass());
+		EntityMeta meta = getEntityMetaOf(entity.getClass());
 		try {
 			return meta.idField.setFieldValue(entity, id, defaultFieldConverter);
 		} catch (RepositoryException ex) {
@@ -378,7 +401,7 @@ public class EntityManager {
 	}
 
 	public static Object getEntityId(Object entity) throws RepositoryException {
-		EntityMeta meta = getEntityMetaByType(entity.getClass());
+		EntityMeta meta = getEntityMetaOf(entity.getClass());
 		try {
 			return meta.idField.getFieldValue(entity);
 		} catch (RepositoryException ex) {

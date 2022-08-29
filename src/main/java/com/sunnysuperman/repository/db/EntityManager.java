@@ -117,7 +117,8 @@ public class EntityManager {
 			// 1.自定义转换器
 			FieldConverter converter = getConverter();
 			if (converter != null) {
-				Object convertedValue = converter.convertToField(value);
+				@SuppressWarnings("unchecked")
+				Object convertedValue = converter.convertToField(value, field.getType());
 				writeMethod.invoke(entity, convertedValue);
 				return convertedValue;
 			}

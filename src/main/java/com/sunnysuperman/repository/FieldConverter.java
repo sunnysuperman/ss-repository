@@ -4,5 +4,5 @@ public interface FieldConverter<T> {
 
 	Object convertToColumn(T fieldValue);
 
-	T convertToField(Object columnValue);
+	T convertToField(Object columnValue, Class<T> type);
 }

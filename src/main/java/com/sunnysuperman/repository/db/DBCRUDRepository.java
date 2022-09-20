@@ -123,8 +123,11 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 			result.setUpdated(updated);
 			return result;
 		}
-		// upsert
 		Map<String, Object> upsertData = row.getUpsertData();
+		if (upsertData == null) {
+			return result;
+		}
+		// upsert
 		boolean inserted = insertDoc(tableName, upsertData);
 		result.setInserted(inserted);
 		return result;
@@ -236,6 +239,10 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 	public Map<ID, T> findByIdsAsMap(Collection<ID> ids) throws RepositoryException {
 		List<T> list = findByIds(ids);
 		return list2map(list);
+	}
+
+	protected final T find(String sql, Object[] params) {
+		return find(sql, params, getEntityMapper());
 	}
 
 	protected final Page<T> findForPage(String sql, Object[] params, PageRequest page) {

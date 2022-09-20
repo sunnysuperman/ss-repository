@@ -4,6 +4,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
@@ -29,6 +30,7 @@ import com.sunnysuperman.repository.annotation.IdStrategy;
 import com.sunnysuperman.repository.annotation.ManyToOne;
 import com.sunnysuperman.repository.annotation.OneToOne;
 import com.sunnysuperman.repository.annotation.Table;
+import com.sunnysuperman.repository.annotation.VersionControl;
 
 public class EntityManager {
 	private static final Logger LOG = LoggerFactory.getLogger(EntityManager.class);
@@ -46,6 +48,7 @@ public class EntityManager {
 	protected static class EntityMeta {
 		protected List<EntityField> normalFields;
 		protected EntityField idField;
+		protected EntityField versionField;
 		protected Id idInfo;
 		protected String tableName;
 	}
@@ -133,7 +136,12 @@ public class EntityManager {
 				if (value.getClass() != type) {
 					value = defaultFieldConverter.convertToField(value, type, field.getGenericType());
 				}
-				writeMethod.invoke(entity, value);
+				try {
+					writeMethod.invoke(entity, value);
+				} catch (Exception ex) {
+					throw new RuntimeException("Failed to set value of " + field.getName() + " by value: ["
+							+ value.getClass() + "] " + value.toString(), ex);
+				}
 				return value;
 			}
 			// 3.2关联对象
@@ -201,13 +209,13 @@ public class EntityManager {
 				throw new RepositoryException("Duplicated column '" + columnName + "' in " + clazz);
 			}
 			columnNames.add(columnName);
-			EntityField efield = new EntityField();
-			efield.field = field;
-			efield.readMethod = method;
-			efield.writeMethod = BeanUtils.getWriteMethodByField(field);
-			efield.fieldName = field.getName();
-			efield.columnName = columnName;
-			efield.column = column;
+			EntityField f = new EntityField();
+			f.field = field;
+			f.readMethod = method;
+			f.writeMethod = BeanUtils.getWriteMethodByField(field);
+			f.fieldName = field.getName();
+			f.columnName = columnName;
+			f.column = column;
 			OneToOne oneToOne = field.getAnnotation(OneToOne.class);
 			ManyToOne manyToOne = oneToOne == null ? field.getAnnotation(ManyToOne.class) : null;
 			if (oneToOne != null || manyToOne != null) {
@@ -215,21 +223,31 @@ public class EntityManager {
 				if (relationType.getAnnotation(Entity.class) == null) {
 					throw new RepositoryException(relationType + " is not annotated with Entity");
 				}
-				efield.relation = true;
-				efield.relationFieldName = StringUtil
+				f.relation = true;
+				f.relationFieldName = StringUtil
 						.emptyToNull(oneToOne != null ? oneToOne.relationField() : manyToOne.relationField());
 
 			}
 			if (field != null && field.getAnnotation(Id.class) != null) {
 				if (idField != null) {
-					throw new RepositoryException("Duplicated id column of " + clazz);
+					throw new RepositoryException("Duplicate id column of " + clazz);
 				}
-				idField = efield;
+				idField = f;
 				idInfo = field.getAnnotation(Id.class);
 			} else {
-				normalFields.add(efield);
+				normalFields.add(f);
+				if (field.getAnnotation(VersionControl.class) != null) {
+					if (meta.versionField != null) {
+						throw new RepositoryException("Duplicate version column of " + clazz);
+					}
+					if (!f.column.updatable()) {
+						throw new RepositoryException("Version column should be updatable of " + clazz);
+					}
+					meta.versionField = f;
+				}
 			}
 		}
+		// to save memory
 		meta.normalFields = new ArrayList<>(normalFields);
 		normalFields = null;
 		meta.idField = idField;
@@ -289,7 +307,6 @@ public class EntityManager {
 		Object id = null;
 		boolean update = false;
 		if (meta.idField != null) {
-			row.setIdColumns(new String[] { meta.idField.columnName });
 			id = meta.idField.getColumnValue(entity, defaultFieldConverter);
 			switch (insertUpdate) {
 			case INSERT:
@@ -310,7 +327,17 @@ public class EntityManager {
 			if (id == null) {
 				throw new RepositoryException("Require id to update");
 			}
-			row.setIdValues(new Object[] { id });
+			if (meta.versionField == null) {
+				row.setIdColumns(new String[] { meta.idField.columnName });
+				row.setIdValues(new Object[] { id });
+			} else {
+				Object version = meta.versionField.getColumnValue(entity, defaultFieldConverter);
+				if (version == null) {
+					throw new RepositoryException("Version is null on update");
+				}
+				row.setIdColumns(new String[] { meta.idField.columnName, meta.versionField.columnName });
+				row.setIdValues(new Object[] { id, version });
+			}
 			if (insertUpdate == InsertUpdate.UPSERT) {
 				upsert = meta.idInfo.strategy() == IdStrategy.PROVIDED;
 			}
@@ -326,7 +353,7 @@ public class EntityManager {
 		if (upsert) {
 			upsertDoc = new HashMap<>();
 			if (id != null) {
-				upsertDoc.put(row.getIdColumns()[0], id);
+				upsertDoc.put(meta.idField.columnName, id);
 			}
 			row.setUpsertData(upsertDoc);
 		}
@@ -340,27 +367,36 @@ public class EntityManager {
 					continue;
 				}
 			} else {
-				// 所有字段插入或更新
+				// 更新不成插入
 				if (upsert) {
 					if (column.insertable()) {
-						columnValue = field.getColumnValue(entity, defaultFieldConverter);
-						columnValueGot = true;
+						if (!columnValueGot) {
+							columnValue = field.getColumnValue(entity, defaultFieldConverter);
+							columnValueGot = true;
+						}
 						upsertDoc.put(field.columnName, columnValue);
 					}
 				}
+				// 仅更新
 				if (update) {
 					if (!column.updatable()) {
 						continue;
 					}
-				} else if (!column.insertable()) {
+				}
+				// 仅插入
+				else if (!column.insertable()) {
 					continue;
 				}
 			}
-			doc.put(field.columnName,
-					columnValueGot ? columnValue : field.getColumnValue(entity, defaultFieldConverter));
+			if (update && field == meta.versionField) {
+				doc.put("$inc", Collections.singletonMap(field.columnName, 1));
+			} else {
+				columnValue = columnValueGot ? columnValue : field.getColumnValue(entity, defaultFieldConverter);
+				doc.put(field.columnName, columnValue);
+			}
 		}
 		if (!update && id != null) {
-			doc.put(row.getIdColumns()[0], id);
+			doc.put(meta.idField.columnName, id);
 		}
 		return row;
 	}

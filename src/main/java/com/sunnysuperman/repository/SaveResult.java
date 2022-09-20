@@ -5,6 +5,10 @@ public class SaveResult {
 	private boolean updated;
 	private Object generatedId;
 
+	public boolean success() {
+		return inserted || updated;
+	}
+
 	public boolean isInserted() {
 		return inserted;
 	}

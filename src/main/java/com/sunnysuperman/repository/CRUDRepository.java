@@ -21,6 +21,8 @@ public interface CRUDRepository<T, ID> {
 
 	int deleteByIds(Collection<ID> ids) throws RepositoryException;
 
+	boolean delete(T entity) throws RepositoryException;
+
 	boolean existsById(ID id) throws RepositoryException;
 
 	T findById(ID id) throws RepositoryException;
@@ -30,4 +32,6 @@ public interface CRUDRepository<T, ID> {
 	List<T> findByIdsInOrder(Collection<ID> ids) throws RepositoryException;
 
 	Map<ID, T> findByIdsAsMap(Collection<ID> ids) throws RepositoryException;
+
+	List<T> findAll() throws RepositoryException;
 }

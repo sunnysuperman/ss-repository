@@ -5,15 +5,22 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.sunnysuperman.commons.page.Page;
 import com.sunnysuperman.commons.page.PageRequest;
 import com.sunnysuperman.commons.page.PullPage;
 import com.sunnysuperman.commons.page.PullPageRequest;
+import com.sunnysuperman.commons.util.StringUtil;
 import com.sunnysuperman.repository.CRUDRepository;
+import com.sunnysuperman.repository.FieldValue;
 import com.sunnysuperman.repository.InsertUpdate;
 import com.sunnysuperman.repository.RepositoryException;
 import com.sunnysuperman.repository.SaveResult;
@@ -25,8 +32,11 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 	private DBMapper<T> entityMapper;
 	private String table;
 	private String findByIdSql;
+	private String findAllSql;
 	private String deleteByIdSql;
+	private VersionAwareSql deleteByIdAndVersionSql;
 	private String existsByIdSql;
+	private Map<String, String> fieldColumnMapping = new ConcurrentHashMap<>();
 
 	private final class TheEntityMapper implements DBMapper<T> {
 
@@ -60,6 +70,23 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 		return table;
 	}
 
+	protected final String getColumnsByFields(String fields) {
+		if (fields == null) {
+			throw new IllegalArgumentException("fields");
+		}
+		String columns = fieldColumnMapping.get(fields);
+		if (columns == null) {
+			Set<String> fieldSet = new HashSet<>(StringUtil.split(fields, ","));
+			Set<String> columnSet = EntityManager.findColumnNames(getEntityClass(), fieldSet);
+			if (columnSet.size() < fieldSet.size()) {
+				throw new RepositoryException("Some columns not found for " + StringUtil.join(fields));
+			}
+			columns = StringUtil.join(columnSet);
+			fieldColumnMapping.put(fields, columns);
+		}
+		return columns;
+	}
+
 	@SuppressWarnings("unchecked")
 	protected final Map<ID, T> list2map(List<T> list) {
 		if (list.isEmpty()) {
@@ -72,7 +99,7 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 		return map;
 	}
 
-	protected DefautFieldConverter getDefaultFieldConverter() {
+	protected DefaultFieldConverter getDefaultFieldConverter() {
 		return BuildInDefautFieldConverter.getInstance();
 	}
 
@@ -169,6 +196,12 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 	}
 
 	@Override
+	protected JdbcTemplate getJdbcTemplate() {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+	@Override
 	public boolean deleteById(ID id) throws RepositoryException {
 		if (deleteByIdSql == null) {
 			deleteByIdSql = new StringBuilder("delete from ").append(getTable()).append(" where ")
@@ -186,6 +219,28 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 				.append(EntityManager.getIdColumnName(getEntityClass()));
 		appendInClause(sql, ids);
 		return execute(sql.toString(), ids.toArray());
+	}
+
+	@Override
+	public boolean delete(T entity) throws RepositoryException {
+		FieldValue idField = EntityManager.findIdFieldAndValue(entity, getDefaultFieldConverter());
+		FieldValue versionField = EntityManager.findVersionFieldAndValue(entity, getDefaultFieldConverter());
+		// SQL缓存
+		if (deleteByIdAndVersionSql == null) {
+			StringBuilder sql = new StringBuilder("delete from ").append(getTable()).append(" where ")
+					.append(idField.getColumnName()).append("=?");
+			if (versionField != null) {
+				sql.append(" and ").append(versionField.getColumnName()).append("=?");
+			}
+			deleteByIdAndVersionSql = new VersionAwareSql(sql.toString(), versionField != null);
+		}
+		Object[] params;
+		if (deleteByIdAndVersionSql.isHasVesion()) {
+			params = new Object[] { idField.getColumnValue(), versionField.getColumnValue() };
+		} else {
+			params = new Object[] { idField.getColumnValue() };
+		}
+		return execute(deleteByIdAndVersionSql.getSql(), params) > 0;
 	}
 
 	@Override
@@ -241,6 +296,34 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 		return list2map(list);
 	}
 
+	@Override
+	public List<T> findAll() {
+		if (findAllSql == null) {
+			findAllSql = new StringBuilder("select * from ").append(getTable()).toString();
+		}
+		int max = maxItemsForFindAll();
+		List<T> items = findForList(findAllSql, null, 0, max + 1, getEntityMapper());
+		if (max > 0 && items.size() > max) {
+			throw new RepositoryException("To prevent from OOM, we could not load more than " + max + " items");
+		}
+		return items;
+	}
+
+	protected int maxItemsForFindAll() {
+		return 10000;
+	}
+
+	protected final int updateDoc(String tableName, Map<String, Object> doc, String key, Object value,
+			DefaultFieldConverter converter) {
+		for (Entry<String, Object> entry : doc.entrySet()) {
+			Object val = entry.getValue();
+			if (val != null) {
+				entry.setValue(converter.convertToColumn(val));
+			}
+		}
+		return super.updateDoc(tableName, doc, key, value);
+	}
+
 	protected final T find(String sql, Object[] params) {
 		return find(sql, params, getEntityMapper());
 	}
@@ -256,6 +339,18 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 	protected final PullPage<T> findForPullPageByColumn(String sql, Object[] params, String column,
 			PullPageRequest page) {
 		return findForPullPageByColumn(sql, params, column, page.getLimit(), getEntityMapper());
+	}
+
+	protected final List<T> findForList(String sql, Object[] params, int offset, int limit) {
+		return findForList(sql, params, offset, limit, getEntityMapper());
+	}
+
+	protected final List<T> findForList(String sql, Object[] params) {
+		return findForList(sql, params, 0, 0, getEntityMapper());
+	}
+
+	protected final Set<T> findForSet(String sql, Object[] params, int offset, int limit) {
+		return findForSet(sql, params, offset, limit, getEntityMapper());
 	}
 
 }

@@ -2,7 +2,7 @@ package com.sunnysuperman.repository.db;
 
 import java.lang.reflect.Type;
 
-public interface DefautFieldConverter {
+public interface DefaultFieldConverter {
 
 	Object convertToColumn(Object fieldValue);
 

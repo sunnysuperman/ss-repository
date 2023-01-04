@@ -98,14 +98,14 @@ public abstract class DBRepository {
 		return getJdbcTemplate().batchUpdate(sql, batchParams);
 	}
 
-	public boolean insertDoc(String tableName, Map<String, ?> doc) {
+	public boolean insertDoc(String tableName, Map<String, Object> doc) {
 		List<Object> params = new ArrayList<Object>(doc.size());
 		String sql = getInsertDialect(doc, tableName, params);
 		return execute(sql, params.toArray(new Object[params.size()])) > 0;
 	}
 
 	@SuppressWarnings("unchecked")
-	public <T extends Number> T insertDoc(String tableName, Map<String, ?> doc, Class<T> generatedKeyClass) {
+	public <T extends Number> T insertDoc(String tableName, Map<String, Object> doc, Class<T> generatedKeyClass) {
 		List<Object> params = new ArrayList<Object>(doc.size());
 		String sql = getInsertDialect(doc, tableName, params);
 		Object[] paramsArray = params.toArray(new Object[params.size()]);
@@ -171,7 +171,7 @@ public abstract class DBRepository {
 		getJdbcTemplate().batchUpdate(sql, paramsList);
 	}
 
-	public int updateDoc(String tableName, Map<String, ?> doc, String[] keys, Object[] values) {
+	public int updateDoc(String tableName, Map<String, Object> doc, String[] keys, Object[] values) {
 		StringBuilder buf = new StringBuilder("update ");
 		buf.append(tableName);
 		buf.append(" set ");
@@ -230,7 +230,7 @@ public abstract class DBRepository {
 		return execute(buf.toString(), paramsAsArray);
 	}
 
-	public int updateDoc(String tableName, Map<String, ?> doc, String key, Object value) {
+	public int updateDoc(String tableName, Map<String, Object> doc, String key, Object value) {
 		return updateDoc(tableName, doc, new String[] { key }, new Object[] { value });
 	}
 

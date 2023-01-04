@@ -21,8 +21,11 @@ import com.sunnysuperman.commons.util.StringUtil;
 import com.sunnysuperman.repository.ClassFinder;
 import com.sunnysuperman.repository.ClassFinder.ClassFilter;
 import com.sunnysuperman.repository.FieldConverter;
+import com.sunnysuperman.repository.FieldValue;
 import com.sunnysuperman.repository.InsertUpdate;
+import com.sunnysuperman.repository.MultiColumn;
 import com.sunnysuperman.repository.RepositoryException;
+import com.sunnysuperman.repository.SerializeContext;
 import com.sunnysuperman.repository.annotation.Column;
 import com.sunnysuperman.repository.annotation.Entity;
 import com.sunnysuperman.repository.annotation.Id;
@@ -51,6 +54,19 @@ public class EntityManager {
 		protected EntityField versionField;
 		protected Id idInfo;
 		protected String tableName;
+
+		public Set<String> columnNames(Set<String> fields) {
+			Set<String> columns = new HashSet<>(fields.size());
+			for (EntityField f : normalFields) {
+				if (fields.contains(f.fieldName)) {
+					columns.add(f.columnName);
+				}
+			}
+			if (idField != null && fields.contains(idField.fieldName)) {
+				columns.add(idField.columnName);
+			}
+			return columns;
+		}
 	}
 
 	protected static class EntityField {
@@ -88,12 +104,13 @@ public class EntityManager {
 		}
 
 		@SuppressWarnings({ "rawtypes", "unchecked" })
-		public Object getColumnValue(Object entity, DefautFieldConverter defaultFieldConverter) {
+		public Object getColumnValue(Object entity, SerializeContext context,
+				DefaultFieldConverter defaultFieldConverter) {
 			Object fieldValue = getFieldValue(entity);
 			// 自定义转换器
 			FieldConverter converter = getConverter();
 			if (converter != null) {
-				return converter.convertToColumn(fieldValue);
+				return converter.convertToColumn(fieldValue, context);
 			}
 			if (fieldValue == null) {
 				return null;
@@ -103,7 +120,7 @@ public class EntityManager {
 				return defaultFieldConverter.convertToColumn(fieldValue);
 			}
 			// 关联对象
-			return ensureRelationField().getColumnValue(fieldValue, defaultFieldConverter);
+			return ensureRelationField().getColumnValue(fieldValue, context, defaultFieldConverter);
 		}
 
 		public Object getFieldValue(Object entity) {
@@ -114,14 +131,21 @@ public class EntityManager {
 			}
 		}
 
+		public Object getRelationFieldValue(Object entity) {
+			if (!relation) {
+				return getFieldValue(entity);
+			}
+			return ensureRelationField().getRelationFieldValue(getFieldValue(entity));
+		}
+
 		@SuppressWarnings({ "rawtypes" })
-		public Object setFieldValue(Object entity, Object value, DefautFieldConverter defaultFieldConverter)
-				throws Exception {
+		public Object setFieldValue(Object entity, Object value, DBDeserializeContext context,
+				DefaultFieldConverter defaultFieldConverter) throws Exception {
 			// 1.自定义转换器
 			FieldConverter converter = getConverter();
 			if (converter != null) {
 				@SuppressWarnings("unchecked")
-				Object convertedValue = converter.convertToField(value, field.getType());
+				Object convertedValue = converter.convertToField(value, field.getType(), context);
 				writeMethod.invoke(entity, convertedValue);
 				return convertedValue;
 			}
@@ -147,7 +171,7 @@ public class EntityManager {
 			// 3.2关联对象
 			Object relationEntity = type.newInstance();
 			writeMethod.invoke(entity, relationEntity);
-			ensureRelationField().setFieldValue(relationEntity, value, defaultFieldConverter);
+			ensureRelationField().setFieldValue(relationEntity, value, context, defaultFieldConverter);
 			return relationEntity;
 		}
 
@@ -295,19 +319,20 @@ public class EntityManager {
 	}
 
 	public static SerializedRow serialize(Object entity, InsertUpdate insertUpdate,
-			DefautFieldConverter defaultFieldConverter) throws RepositoryException {
+			DefaultFieldConverter defaultFieldConverter) throws RepositoryException {
 		return serialize(entity, null, insertUpdate, defaultFieldConverter);
 	}
 
 	public static SerializedRow serialize(Object entity, Set<String> fields, InsertUpdate insertUpdate,
-			DefautFieldConverter defaultFieldConverter) throws RepositoryException {
+			DefaultFieldConverter defaultFieldConverter) throws RepositoryException {
 		EntityMeta meta = getEntityMetaOf(entity.getClass());
+		SerializeContext context = new DBSerializeContext(entity, fields, insertUpdate, defaultFieldConverter);
 		SerializedRow row = new SerializedRow();
 		row.setTableName(meta.tableName);
 		Object id = null;
 		boolean update = false;
 		if (meta.idField != null) {
-			id = meta.idField.getColumnValue(entity, defaultFieldConverter);
+			id = meta.idField.getColumnValue(entity, context, defaultFieldConverter);
 			switch (insertUpdate) {
 			case INSERT:
 				update = false;
@@ -331,15 +356,16 @@ public class EntityManager {
 				row.setIdColumns(new String[] { meta.idField.columnName });
 				row.setIdValues(new Object[] { id });
 			} else {
-				Object version = meta.versionField.getColumnValue(entity, defaultFieldConverter);
+				Object version = meta.versionField.getColumnValue(entity, context, defaultFieldConverter);
 				if (version == null) {
 					throw new RepositoryException("Version is null on update");
 				}
 				row.setIdColumns(new String[] { meta.idField.columnName, meta.versionField.columnName });
 				row.setIdValues(new Object[] { id, version });
 			}
-			if (insertUpdate == InsertUpdate.UPSERT) {
-				upsert = meta.idInfo.strategy() == IdStrategy.PROVIDED;
+			if (insertUpdate == InsertUpdate.UPSERT && meta.idInfo.strategy() == IdStrategy.PROVIDED
+					&& meta.versionField == null) {
+				upsert = true;
 			}
 		} else {
 			Id idInfo = meta.idInfo;
@@ -371,10 +397,10 @@ public class EntityManager {
 				if (upsert) {
 					if (column.insertable()) {
 						if (!columnValueGot) {
-							columnValue = field.getColumnValue(entity, defaultFieldConverter);
+							columnValue = field.getColumnValue(entity, context, defaultFieldConverter);
 							columnValueGot = true;
 						}
-						upsertDoc.put(field.columnName, columnValue);
+						setColumn(upsertDoc, field, columnValue);
 					}
 				}
 				// 仅更新
@@ -391,8 +417,9 @@ public class EntityManager {
 			if (update && field == meta.versionField) {
 				doc.put("$inc", Collections.singletonMap(field.columnName, 1));
 			} else {
-				columnValue = columnValueGot ? columnValue : field.getColumnValue(entity, defaultFieldConverter);
-				doc.put(field.columnName, columnValue);
+				columnValue = columnValueGot ? columnValue
+						: field.getColumnValue(entity, context, defaultFieldConverter);
+				setColumn(doc, field, columnValue);
 			}
 		}
 		if (!update && id != null) {
@@ -401,16 +428,29 @@ public class EntityManager {
 		return row;
 	}
 
-	public static <T> T deserialize(Map<String, Object> doc, Class<T> type, DefautFieldConverter defaultFieldConverter)
+	private static void setColumn(Map<String, Object> doc, EntityField field, Object columnValue) {
+		if (columnValue != null && columnValue instanceof MultiColumn) {
+			MultiColumn mc = (MultiColumn) columnValue;
+			Map<String, Object> cols = mc.getColumns();
+			if (cols != null) {
+				doc.putAll(cols);
+			}
+		} else {
+			doc.put(field.columnName, columnValue);
+		}
+	}
+
+	public static <T> T deserialize(Map<String, Object> doc, Class<T> type, DefaultFieldConverter defaultFieldConverter)
 			throws RepositoryException {
 		EntityMeta meta = getEntityMetaOf(type);
+		DBDeserializeContext context = new DBDeserializeContext(doc, defaultFieldConverter);
 		try {
 			T entity = type.newInstance();
 			for (EntityField field : meta.normalFields) {
-				field.setFieldValue(entity, doc.get(field.columnName), defaultFieldConverter);
+				field.setFieldValue(entity, doc.get(field.columnName), context, defaultFieldConverter);
 			}
 			if (meta.idField != null) {
-				meta.idField.setFieldValue(entity, doc.get(meta.idField.columnName), defaultFieldConverter);
+				meta.idField.setFieldValue(entity, doc.get(meta.idField.columnName), context, defaultFieldConverter);
 			}
 			return entity;
 		} catch (RepositoryException ex) {
@@ -425,11 +465,11 @@ public class EntityManager {
 		return meta.idField.columnName;
 	}
 
-	public static Object setEntityId(Object entity, Object id, DefautFieldConverter defaultFieldConverter)
+	public static Object setEntityId(Object entity, Object id, DefaultFieldConverter defaultFieldConverter)
 			throws RepositoryException {
 		EntityMeta meta = getEntityMetaOf(entity.getClass());
 		try {
-			return meta.idField.setFieldValue(entity, id, defaultFieldConverter);
+			return meta.idField.setFieldValue(entity, id, null, defaultFieldConverter);
 		} catch (RepositoryException ex) {
 			throw ex;
 		} catch (Exception ex) {
@@ -440,11 +480,62 @@ public class EntityManager {
 	public static Object getEntityId(Object entity) throws RepositoryException {
 		EntityMeta meta = getEntityMetaOf(entity.getClass());
 		try {
-			return meta.idField.getFieldValue(entity);
+			return meta.idField.getRelationFieldValue(entity);
 		} catch (RepositoryException ex) {
 			throw ex;
 		} catch (Exception ex) {
 			throw new RepositoryException(ex);
 		}
+	}
+
+	public static FieldValue findIdFieldAndValue(Object entity, DefaultFieldConverter defaultFieldConverter)
+			throws RepositoryException {
+		EntityMeta meta = getEntityMetaOf(entity.getClass());
+		if (meta.idField == null) {
+			return null;
+		}
+		return makeFieldValue(meta.idField, entity, defaultFieldConverter);
+	}
+
+	public static FieldValue getIdFieldAndValue(Object entity, DefaultFieldConverter defaultFieldConverter)
+			throws RepositoryException {
+		FieldValue fieldValue = findIdFieldAndValue(entity, defaultFieldConverter);
+		if (fieldValue == null) {
+			throw new RepositoryException("No id field");
+		}
+		return fieldValue;
+	}
+
+	public static FieldValue findVersionFieldAndValue(Object entity, DefaultFieldConverter defaultFieldConverter)
+			throws RepositoryException {
+		EntityMeta meta = getEntityMetaOf(entity.getClass());
+		if (meta.versionField == null) {
+			return null;
+		}
+		return makeFieldValue(meta.versionField, entity, defaultFieldConverter);
+	}
+
+	public static FieldValue getVersionFieldAndValue(Object entity, DefaultFieldConverter defaultFieldConverter)
+			throws RepositoryException {
+		FieldValue fieldValue = findVersionFieldAndValue(entity, defaultFieldConverter);
+		if (fieldValue == null) {
+			throw new RepositoryException("No version field");
+		}
+		return fieldValue;
+	}
+
+	public static Set<String> findColumnNames(Class<?> clazz, Set<String> fields) {
+		EntityMeta meta = getEntityMetaOf(clazz);
+		return meta.columnNames(fields);
+	}
+
+	private static FieldValue makeFieldValue(EntityField eField, Object entity,
+			DefaultFieldConverter defaultFieldConverter) {
+		FieldValue fieldValue = new FieldValue();
+		fieldValue.setName(eField.fieldName);
+		fieldValue.setValue(eField.getRelationFieldValue(entity));
+		fieldValue.setColumnName(eField.columnName);
+		fieldValue.setColumnValue(eField.getColumnValue(entity, null, defaultFieldConverter));
+		return fieldValue;
 	}
 }

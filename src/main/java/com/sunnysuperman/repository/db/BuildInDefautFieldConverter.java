@@ -5,7 +5,7 @@ import java.math.BigDecimal;
 
 import com.sunnysuperman.commons.util.FormatUtil;
 
-public class BuildInDefautFieldConverter implements DefautFieldConverter {
+public class BuildInDefautFieldConverter implements DefaultFieldConverter {
 	private static final BuildInDefautFieldConverter INSTANCE = new BuildInDefautFieldConverter();
 
 	public static BuildInDefautFieldConverter getInstance() {

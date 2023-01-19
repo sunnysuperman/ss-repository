@@ -10,11 +10,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.PreparedStatementCallback;
 import org.springframework.jdbc.core.PreparedStatementCreator;
-import org.springframework.jdbc.support.KeyHolder;
 
 public class LogAwareJdbcTemplate extends JdbcTemplate {
 	private static final Logger LOG = LoggerFactory.getLogger(LogAwareJdbcTemplate.class);
+	private static final boolean INFO_ENABLED = LOG.isInfoEnabled();
 
 	public LogAwareJdbcTemplate(DataSource dataSource, boolean lazyInit) {
 		super(dataSource, lazyInit);
@@ -30,60 +31,74 @@ public class LogAwareJdbcTemplate extends JdbcTemplate {
 
 	@Override
 	public List<Map<String, Object>> queryForList(String sql, Object... args) throws DataAccessException {
-		long t1 = System.nanoTime();
+		long t1 = getT1();
 		try {
 			return super.queryForList(sql, args);
 		} finally {
-			long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
-			LOG.info("[Jdbc] {}, take {} ms", sql, take);
+			if (INFO_ENABLED) {
+				long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
+				LOG.info("[Jdbc] {}, take {} ms", sql, take);
+			}
 		}
 	}
 
 	@Override
 	public <T> T queryForObject(String sql, Object[] args, Class<T> requiredType) throws DataAccessException {
-		long t1 = System.nanoTime();
+		long t1 = getT1();
 		try {
 			return super.queryForObject(sql, args, requiredType);
 		} finally {
-			long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
-			LOG.info("[Jdbc] {}, take {} ms", sql, take);
-		}
-	}
-
-	@Override
-	public int update(PreparedStatementCreator psc, KeyHolder generatedKeyHolder) throws DataAccessException {
-		long t1 = System.nanoTime();
-		try {
-			return super.update(psc, generatedKeyHolder);
-		} finally {
-			long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
-			if (psc instanceof CreateWithGeneratedKeyStatement) {
-				LOG.info("[Jdbc] {}, take {} ms", ((CreateWithGeneratedKeyStatement) psc).getSql(), take);
-			} else {
-				LOG.info("[Jdbc] {}, take {} ms", psc.toString(), take);
+			if (INFO_ENABLED) {
+				long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
+				LOG.info("[Jdbc] {}, take {} ms", sql, take);
 			}
 		}
 	}
 
 	@Override
 	public int update(String sql, Object... args) throws DataAccessException {
-		long t1 = System.nanoTime();
+		long t1 = getT1();
 		try {
 			return super.update(sql, args);
 		} finally {
-			long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
-			LOG.info("[Jdbc] {}, take {} ms", sql, take);
+			if (INFO_ENABLED) {
+				long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
+				LOG.info("[Jdbc] {}, take {} ms", sql, take);
+			}
 		}
 	}
 
 	@Override
 	public int[] batchUpdate(String sql, List<Object[]> batchArgs) throws DataAccessException {
-		long t1 = System.nanoTime();
+		long t1 = getT1();
 		try {
 			return super.batchUpdate(sql, batchArgs);
 		} finally {
-			long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
-			LOG.info("[Jdbc] {}, take {} ms", sql, take);
+			if (INFO_ENABLED) {
+				long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
+				LOG.info("[Jdbc] {}, take {} ms", sql, take);
+			}
 		}
+	}
+
+	@Override
+	public <T> T execute(PreparedStatementCreator psc, PreparedStatementCallback<T> action) throws DataAccessException {
+		long t1 = getT1();
+		try {
+			return super.execute(psc, action);
+		} finally {
+			if (INFO_ENABLED) {
+				long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
+				if (psc instanceof GeneratKeysPreparedStatementCreator) {
+					LOG.info("[Jdbc] {}, take {} ms", ((GeneratKeysPreparedStatementCreator) psc).getSql(), take);
+				} else {
+					LOG.info("[Jdbc] {}, take {} ms", psc.toString(), take);
+				}
+			}
+		}
+	}
+
+	private long getT1() {
+		return INFO_ENABLED ? System.nanoTime() : 0;
 	}
 }

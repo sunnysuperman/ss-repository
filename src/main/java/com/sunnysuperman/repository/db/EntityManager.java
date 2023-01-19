@@ -123,6 +123,13 @@ public class EntityManager {
 			return ensureRelationField().getColumnValue(fieldValue, context, defaultFieldConverter);
 		}
 
+		public Class<?> getFieldType() {
+			if (!relation) {
+				return field.getType();
+			}
+			return ensureRelationField().getFieldType();
+		}
+
 		public Object getFieldValue(Object entity) {
 			try {
 				return readMethod.invoke(entity);
@@ -486,6 +493,11 @@ public class EntityManager {
 		} catch (Exception ex) {
 			throw new RepositoryException(ex);
 		}
+	}
+
+	public static Class<?> getIdFieldType(Object entity) throws RepositoryException {
+		EntityMeta meta = getEntityMetaOf(entity.getClass());
+		return meta.idField == null ? null : meta.idField.getFieldType();
 	}
 
 	public static FieldValue findIdFieldAndValue(Object entity, DefaultFieldConverter defaultFieldConverter)

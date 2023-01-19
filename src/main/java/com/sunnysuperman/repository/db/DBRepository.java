@@ -10,7 +10,6 @@ import java.util.Map.Entry;
 import java.util.Set;
 
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
 
 import com.sunnysuperman.commons.page.Page;
 import com.sunnysuperman.commons.page.PullPage;
@@ -28,13 +27,13 @@ public abstract class DBRepository {
 		return columnName;
 	}
 
-	protected String getInsertDialect(Map<String, ?> kv, String tableName, List<Object> params) {
+	protected SqlAndParams getInsertDialect(String tableName, Map<String, ?> doc) {
 		StringBuilder buf = new StringBuilder("insert into ").append(tableName).append('(');
-
 		StringBuilder buf2 = new StringBuilder();
+		List<Object> params = new ArrayList<>(doc.size());
 
 		int i = -1;
-		for (Entry<String, ?> entry : kv.entrySet()) {
+		for (Entry<String, ?> entry : doc.entrySet()) {
 			i++;
 			if (i > 0) {
 				buf.append(',');
@@ -59,7 +58,68 @@ public abstract class DBRepository {
 		buf.append(") values(");
 		buf.append(buf2);
 		buf.append(')');
-		return buf.toString();
+
+		return new SqlAndParams(buf.toString(), params.toArray(new Object[params.size()]));
+	}
+
+	protected SqlAndParams getUpdateDialect(String tableName, Map<String, ?> doc, String[] filterColumns,
+			Object[] filterValues) {
+		StringBuilder sql = new StringBuilder("update ");
+		sql.append(tableName);
+		sql.append(" set ");
+		List<Object> params = new LinkedList<Object>();
+		int offset = 0;
+		for (Entry<String, ?> entry : doc.entrySet()) {
+			String fieldKey = entry.getKey();
+			Object fieldValue = entry.getValue();
+			if (fieldKey.indexOf('$') == 0) {
+				if (fieldKey.equals("$inc")) {
+					Map<?, ?> fieldValueAsMap = (Map<?, ?>) fieldValue;
+					for (Entry<?, ?> incEntry : fieldValueAsMap.entrySet()) {
+						String incKey = convertColumnName(incEntry.getKey().toString());
+						Number incValue = FormatUtil.parseNumber(incEntry.getValue());
+						if (offset > 0) {
+							sql.append(",");
+						}
+						offset++;
+						sql.append(incKey).append("=").append(incKey).append("+?");
+						params.add(incValue);
+					}
+				}
+				continue;
+			}
+			fieldKey = convertColumnName(fieldKey);
+			if (offset > 0) {
+				sql.append(",");
+			}
+			offset++;
+			sql.append(fieldKey);
+			if (fieldValue != null && fieldValue instanceof DBFunction) {
+				// column=ST_GeometryFromText(?,4326), column=point(?,?), etc.
+				DBFunction func = (DBFunction) fieldValue;
+				sql.append("=").append(func.getFunction());
+				if (func.getParams() != null) {
+					for (Object param : func.getParams()) {
+						params.add(param);
+					}
+				}
+			} else {
+				sql.append("=?");
+				params.add(fieldValue);
+			}
+		}
+		sql.append(" where ");
+		for (int i = 0; i < filterColumns.length; i++) {
+			if (i > 0) {
+				sql.append(" and ");
+			}
+			String pk = filterColumns[i];
+			sql.append(convertColumnName(pk));
+			sql.append("=?");
+			params.add(filterValues[i]);
+		}
+		Object[] paramsAsArray = params.toArray(new Object[params.size()]);
+		return new SqlAndParams(sql.toString(), paramsAsArray);
 	}
 
 	protected String getPagingDialect(String sql, int offset, int limit) {
@@ -99,44 +159,43 @@ public abstract class DBRepository {
 	}
 
 	public boolean insertDoc(String tableName, Map<String, Object> doc) {
-		List<Object> params = new ArrayList<Object>(doc.size());
-		String sql = getInsertDialect(doc, tableName, params);
-		return execute(sql, params.toArray(new Object[params.size()])) > 0;
+		SqlAndParams sp = getInsertDialect(tableName, doc);
+		return execute(sp.getSql(), sp.getParams()) > 0;
 	}
 
-	@SuppressWarnings("unchecked")
 	public <T extends Number> T insertDoc(String tableName, Map<String, Object> doc, Class<T> generatedKeyClass) {
-		List<Object> params = new ArrayList<Object>(doc.size());
-		String sql = getInsertDialect(doc, tableName, params);
-		Object[] paramsArray = params.toArray(new Object[params.size()]);
-		GeneratedKeyHolder holder = new GeneratedKeyHolder();
-		boolean inserted = getJdbcTemplate().update(new CreateWithGeneratedKeyStatement(sql, paramsArray), holder) > 0;
-		if (!inserted) {
-			// should not happened
-			throw new RepositoryException("Insert error");
+		SqlAndParams sp = getInsertDialect(tableName, doc);
+		// 无需生成自增ID
+		if (generatedKeyClass == null) {
+			execute(sp.getSql(), sp.getParams());
+			return null;
 		}
-		if (generatedKeyClass == null || generatedKeyClass == Number.class) {
-			return (T) holder.getKey();
+		// insert并生成自增ID
+		T generatedKey = getJdbcTemplate().execute(new GeneratKeysPreparedStatementCreator(sp.getSql()),
+				new InsertPreparedStatementCallback<>(sp.getParams(), generatedKeyClass));
+		if (generatedKey == null) {
+			throw new RepositoryException("Insert error: no id generated");
 		}
-		Number key;
-		if (generatedKeyClass == Long.class) {
-			key = FormatUtil.parseLong(holder.getKey());
-		} else if (generatedKeyClass == Integer.class) {
-			key = FormatUtil.parseInteger(holder.getKey());
-		} else {
-			throw new RepositoryException("Unknown generated key class: " + generatedKeyClass);
-		}
-		return (T) key;
+		return generatedKey;
 	}
 
 	public void insertDocs(String tableName, List<Map<String, Object>> docs) {
+		insertDocs(tableName, docs, null);
+	}
+
+	public <T extends Number> List<T> insertDocs(String tableName, List<Map<String, Object>> docs,
+			Class<T> generatedKeyClass) {
+		// 单个插入
 		if (docs.size() == 1) {
-			insertDoc(tableName, docs.get(0));
-			return;
+			T generatedKey = insertDoc(tableName, docs.get(0), generatedKeyClass);
+			if (generatedKey == null) {
+				return null;
+			}
+			return Collections.singletonList(generatedKey);
 		}
 		Map<String, Object> testDoc = docs.get(0);
-		String[] keys = new String[testDoc.size()];
-		List<Object[]> paramsList = new ArrayList<>(docs.size());
+		String[] columns = new String[testDoc.size()];
+		List<Object[]> paramsBatch = new ArrayList<>(docs.size());
 		String sql;
 		{
 			int i = 0;
@@ -146,7 +205,7 @@ public abstract class DBRepository {
 			buf.append('(');
 			for (Entry<String, Object> entry : testDoc.entrySet()) {
 				String key = entry.getKey();
-				keys[i] = key;
+				columns[i] = key;
 				if (i > 0) {
 					buf.append(',');
 					buf2.append(',');
@@ -162,72 +221,29 @@ public abstract class DBRepository {
 			sql = buf.toString();
 		}
 		for (Map<String, Object> doc : docs) {
-			Object[] params = new Object[keys.length];
-			for (int i = 0; i < keys.length; i++) {
-				params[i] = doc.get(keys[i]);
+			Object[] params = new Object[columns.length];
+			for (int i = 0; i < columns.length; i++) {
+				params[i] = doc.get(columns[i]);
 			}
-			paramsList.add(params);
+			paramsBatch.add(params);
 		}
-		getJdbcTemplate().batchUpdate(sql, paramsList);
+		// 无需生成自增ID
+		if (generatedKeyClass == null) {
+			getJdbcTemplate().batchUpdate(sql, paramsBatch);
+			return null;
+		}
+		// insert并生成自增ID
+		List<T> generatedKeys = getJdbcTemplate().execute(new GeneratKeysPreparedStatementCreator(sql),
+				new InsertBatchPreparedStatementCallback<>(paramsBatch, generatedKeyClass));
+		if (generatedKeys == null) {
+			throw new RepositoryException("Insert error");
+		}
+		return generatedKeys;
 	}
 
 	public int updateDoc(String tableName, Map<String, Object> doc, String[] keys, Object[] values) {
-		StringBuilder buf = new StringBuilder("update ");
-		buf.append(tableName);
-		buf.append(" set ");
-		List<Object> params = new LinkedList<Object>();
-		int offset = 0;
-		for (Entry<String, ?> entry : doc.entrySet()) {
-			String fieldKey = entry.getKey();
-			Object fieldValue = entry.getValue();
-			if (fieldKey.indexOf('$') == 0) {
-				if (fieldKey.equals("$inc")) {
-					Map<?, ?> fieldValueAsMap = (Map<?, ?>) fieldValue;
-					for (Entry<?, ?> incEntry : fieldValueAsMap.entrySet()) {
-						String incKey = convertColumnName(incEntry.getKey().toString());
-						Number incValue = FormatUtil.parseNumber(incEntry.getValue());
-						if (offset > 0) {
-							buf.append(",");
-						}
-						offset++;
-						buf.append(incKey).append("=").append(incKey).append("+?");
-						params.add(incValue);
-					}
-				}
-				continue;
-			}
-			fieldKey = convertColumnName(fieldKey);
-			if (offset > 0) {
-				buf.append(",");
-			}
-			offset++;
-			buf.append(fieldKey);
-			if (fieldValue != null && fieldValue instanceof DBFunction) {
-				// column=ST_GeometryFromText(?,4326), column=point(?,?), etc.
-				DBFunction func = (DBFunction) fieldValue;
-				buf.append("=").append(func.getFunction());
-				if (func.getParams() != null) {
-					for (Object param : func.getParams()) {
-						params.add(param);
-					}
-				}
-			} else {
-				buf.append("=?");
-				params.add(fieldValue);
-			}
-		}
-		buf.append(" where ");
-		for (int i = 0; i < keys.length; i++) {
-			if (i > 0) {
-				buf.append(" and ");
-			}
-			String pk = keys[i];
-			buf.append(convertColumnName(pk));
-			buf.append("=?");
-			params.add(values[i]);
-		}
-		Object[] paramsAsArray = params.toArray(new Object[params.size()]);
-		return execute(buf.toString(), paramsAsArray);
+		SqlAndParams sp = getUpdateDialect(tableName, doc, keys, values);
+		return execute(sp.getSql(), sp.getParams());
 	}
 
 	public int updateDoc(String tableName, Map<String, Object> doc, String key, Object value) {
@@ -366,5 +382,4 @@ public abstract class DBRepository {
 	public boolean exists(String sql, Object[] params) {
 		return find(sql, params, ObjectDBMapper.getInstance()) != null;
 	}
-
 }

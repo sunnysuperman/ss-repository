@@ -12,8 +12,6 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.springframework.jdbc.core.JdbcTemplate;
-
 import com.sunnysuperman.commons.page.Page;
 import com.sunnysuperman.commons.page.PageRequest;
 import com.sunnysuperman.commons.page.PullPage;
@@ -172,17 +170,25 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 
 	@Override
 	public void insertBatch(List<T> entityList) throws RepositoryException {
-		if (entityList.size() == 1) {
-			insert(entityList.get(0));
-			return;
-		}
 		List<Map<String, Object>> docs = new ArrayList<>(entityList.size());
+		boolean idGeneration = false;
 		for (T item : entityList) {
-			Map<String, Object> doc = EntityManager
-					.serialize(item, null, InsertUpdate.INSERT, getDefaultFieldConverter()).getData();
+			SerializedRow row = EntityManager.serialize(item, null, InsertUpdate.INSERT, getDefaultFieldConverter());
+			idGeneration = row.isIdGeneration();
+			Map<String, Object> doc = row.getData();
 			docs.add(doc);
 		}
-		insertDocs(getTable(), docs);
+		if (!idGeneration) {
+			insertDocs(getTable(), docs);
+			return;
+		}
+		List<Number> ids = insertDocs(getTable(), docs, Number.class);
+		if (ids == null) {
+			return;
+		}
+		for (int i = 0; i < entityList.size(); i++) {
+			EntityManager.setEntityId(entityList.get(i), ids.get(i), getDefaultFieldConverter());
+		}
 	}
 
 	@Override
@@ -193,12 +199,6 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 	@Override
 	public boolean update(T entity, Set<String> fields) throws RepositoryException {
 		return save(entity, fields, InsertUpdate.UPDATE).isUpdated();
-	}
-
-	@Override
-	protected JdbcTemplate getJdbcTemplate() {
-		// TODO Auto-generated method stub
-		return null;
 	}
 
 	@Override
@@ -330,6 +330,10 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 
 	protected final Page<T> findForPage(String sql, Object[] params, PageRequest page) {
 		return findForPage(sql, params, page.getOffset(), page.getLimit(), getEntityMapper());
+	}
+
+	protected final Page<T> findForPage(String sql, String countSql, Object[] params, PageRequest page) {
+		return findForPage(sql, countSql, params, page.getOffset(), page.getLimit(), getEntityMapper());
 	}
 
 	protected final PullPage<T> findForPullPage(String sql, Object[] params, PullPageRequest page) {

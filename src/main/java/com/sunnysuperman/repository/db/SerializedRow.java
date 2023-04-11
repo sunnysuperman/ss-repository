@@ -9,6 +9,10 @@ public class SerializedRow {
 	private String[] idColumns;
 	private Object[] idValues;
 	private boolean idGeneration;
+	// Versioning for optimistic locking
+	private boolean versioning;
+	private Object updatedVersion;
+	private Object insertedVersion;
 
 	public String getTableName() {
 		return tableName;
@@ -56,6 +60,30 @@ public class SerializedRow {
 
 	public void setIdGeneration(boolean idGeneration) {
 		this.idGeneration = idGeneration;
+	}
+
+	public boolean isVersioning() {
+		return versioning;
+	}
+
+	public void setVersioning(boolean versioning) {
+		this.versioning = versioning;
+	}
+
+	public Object getUpdatedVersion() {
+		return updatedVersion;
+	}
+
+	public void setUpdatedVersion(Object updatedVersion) {
+		this.updatedVersion = updatedVersion;
+	}
+
+	public Object getInsertedVersion() {
+		return insertedVersion;
+	}
+
+	public void setInsertedVersion(Object insertedVersion) {
+		this.insertedVersion = insertedVersion;
 	}
 
 }

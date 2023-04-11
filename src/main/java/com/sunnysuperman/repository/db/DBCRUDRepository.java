@@ -24,6 +24,7 @@ import com.sunnysuperman.repository.RepositoryException;
 import com.sunnysuperman.repository.SaveResult;
 import com.sunnysuperman.repository.db.mapper.DBMapper;
 import com.sunnysuperman.repository.db.mapper.ObjectDBMapper;
+import com.sunnysuperman.repository.exception.StaleEntityRepositoryException;
 
 public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CRUDRepository<T, ID> {
 	private Class<T> entityClass;
@@ -124,38 +125,53 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 		String tableName = row.getTableName();
 		SaveResult result = new SaveResult();
 		Map<String, Object> data = row.getData();
-		// insert
-		if (insertUpdate == InsertUpdate.INSERT || row.getIdValues() == null) {
-			if (row.isIdGeneration()) {
-				Number id = insertDoc(tableName, data, Number.class);
-				if (id == null) {
-					throw new RepositoryException("Failed to insert and generate id");
+		try {
+			// insert
+			if (insertUpdate == InsertUpdate.INSERT || row.getIdValues() == null) {
+				if (row.isIdGeneration()) {
+					Number id = insertDoc(tableName, data, Number.class);
+					if (id == null) {
+						throw new RepositoryException("Failed to insert and generate id");
+					}
+					// 设置ID到实体，同时回显到结果里
+					result.setGeneratedId(EntityManager.setEntityId(entity, id, getDefaultFieldConverter()));
+					result.setInserted(true);
+				} else {
+					boolean inserted = insertDoc(tableName, data);
+					result.setInserted(inserted);
 				}
-				result.setGeneratedId(EntityManager.setEntityId(entity, id, getDefaultFieldConverter()));
-				result.setInserted(true);
-			} else {
-				boolean inserted = insertDoc(tableName, data);
+				return result;
+			}
+			// update
+			if (row.getIdValues() == null) {
+				throw new RepositoryException("Require id to update");
+			}
+			boolean updated = updateDoc(tableName, data, row.getIdColumns(), row.getIdValues()) > 0;
+			if (updated || insertUpdate == InsertUpdate.UPDATE) {
+				if (!updated && row.isVersioning()) {
+					throw new StaleEntityRepositoryException("Failed to update entity for "
+							+ StringUtil.join(row.getIdColumns()) + "/" + StringUtil.join(row.getIdValues()));
+				}
+				result.setUpdated(updated);
+				return result;
+			}
+			// upsert
+			Map<String, Object> upsertData = row.getUpsertData();
+			if (upsertData != null) {
+				boolean inserted = insertDoc(tableName, upsertData);
 				result.setInserted(inserted);
 			}
 			return result;
+		} finally {
+			// 保存成功，版本号需要更新到实体
+			if (row.isVersioning() && result.success()) {
+				if (result.isUpdated()) {
+					EntityManager.setVersionValue(entity, row.getUpdatedVersion());
+				} else if (row.getInsertedVersion() != null) {
+					EntityManager.setVersionValue(entity, row.getInsertedVersion());
+				}
+			}
 		}
-		// update
-		if (row.getIdValues() == null) {
-			throw new RepositoryException("Require id to update");
-		}
-		boolean updated = updateDoc(tableName, data, row.getIdColumns(), row.getIdValues()) > 0;
-		if (updated || insertUpdate == InsertUpdate.UPDATE) {
-			result.setUpdated(updated);
-			return result;
-		}
-		Map<String, Object> upsertData = row.getUpsertData();
-		if (upsertData == null) {
-			return result;
-		}
-		// upsert
-		boolean inserted = insertDoc(tableName, upsertData);
-		result.setInserted(inserted);
-		return result;
 	}
 
 	@Override

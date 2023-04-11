@@ -4,7 +4,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
@@ -17,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.sunnysuperman.commons.util.FormatUtil;
 import com.sunnysuperman.commons.util.StringUtil;
 import com.sunnysuperman.repository.ClassFinder;
 import com.sunnysuperman.repository.ClassFinder.ClassFilter;
@@ -37,6 +37,8 @@ import com.sunnysuperman.repository.annotation.VersionControl;
 
 public class EntityManager {
 	private static final Logger LOG = LoggerFactory.getLogger(EntityManager.class);
+	private static final Long VERSION_LONG_1 = 1L;
+	private static final Integer VERSION_INT_1 = 1;
 	private static Map<Class<?>, EntityMeta> META_MAP = new ConcurrentHashMap<>();
 
 	private static class EntityClassFilter implements ClassFilter {
@@ -123,6 +125,32 @@ public class EntityManager {
 			return ensureRelationField().getColumnValue(fieldValue, context, defaultFieldConverter);
 		}
 
+		public Object initVersionValue() {
+			Class<?> type = getFieldType();
+			if (type == long.class || type == Long.class) {
+				return VERSION_LONG_1;
+			}
+			if (type == int.class || type == Integer.class) {
+				return VERSION_INT_1;
+			}
+			throw new RuntimeException("Failed to initVersionValue for " + type);
+		}
+
+		public Object makeNextVersionValue(Object entity) {
+			Object fieldValue = getFieldValue(entity);
+			if (fieldValue == null) {
+				return initVersionValue();
+			}
+			Class<?> type = fieldValue.getClass();
+			if (type == long.class || type == Long.class) {
+				return Long.valueOf(FormatUtil.parseLongValue(fieldValue, 0) + 1);
+			}
+			if (type == int.class || type == Integer.class) {
+				return Integer.valueOf(FormatUtil.parseIntValue(fieldValue, 0) + 1);
+			}
+			throw new RuntimeException("Failed to makeNextVersionValue for " + type);
+		}
+
 		public Class<?> getFieldType() {
 			if (!relation) {
 				return field.getType();
@@ -143,6 +171,14 @@ public class EntityManager {
 				return getFieldValue(entity);
 			}
 			return ensureRelationField().getRelationFieldValue(getFieldValue(entity));
+		}
+
+		public void setFieldValue(Object entity, Object value) {
+			try {
+				writeMethod.invoke(entity, value);
+			} catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
+				throw new RepositoryException(e);
+			}
 		}
 
 		@SuppressWarnings({ "rawtypes" })
@@ -261,7 +297,7 @@ public class EntityManager {
 			}
 			if (field != null && field.getAnnotation(Id.class) != null) {
 				if (idField != null) {
-					throw new RepositoryException("Duplicate id column of " + clazz);
+					throw new RepositoryException("Duplicate id field of " + clazz);
 				}
 				idField = f;
 				idInfo = field.getAnnotation(Id.class);
@@ -269,10 +305,16 @@ public class EntityManager {
 				normalFields.add(f);
 				if (field.getAnnotation(VersionControl.class) != null) {
 					if (meta.versionField != null) {
-						throw new RepositoryException("Duplicate version column of " + clazz);
+						throw new RepositoryException("Duplicate version field: " + field);
 					}
-					if (!f.column.updatable()) {
-						throw new RepositoryException("Version column should be updatable of " + clazz);
+					if (field.getType() != Integer.class && field.getType() != Long.class) {
+						throw new RepositoryException("Version field should be Integer or Long: " + field);
+					}
+					if (!f.column.insertable() || !f.column.updatable()) {
+						throw new RepositoryException("Version field should be insertable/updatable: " + field);
+					}
+					if (f.getConverter() != null) {
+						throw new RepositoryException("Version field should not have a converter: " + field);
 					}
 					meta.versionField = f;
 				}
@@ -336,25 +378,9 @@ public class EntityManager {
 		SerializeContext context = new DBSerializeContext(entity, fields, insertUpdate, defaultFieldConverter);
 		SerializedRow row = new SerializedRow();
 		row.setTableName(meta.tableName);
-		Object id = null;
-		boolean update = false;
-		if (meta.idField != null) {
-			id = meta.idField.getColumnValue(entity, context, defaultFieldConverter);
-			switch (insertUpdate) {
-			case INSERT:
-				update = false;
-				break;
-			case UPDATE:
-				update = true;
-				break;
-			case UPSERT:
-				update = id != null;
-				break;
-			default:
-				throw new RepositoryException("Unknown InsertUpdate");
-			}
-		}
-		boolean upsert = false;
+		row.setVersioning(meta.versionField != null);
+		Object id = meta.idField == null ? null : meta.idField.getColumnValue(entity, context, defaultFieldConverter);
+		boolean update = (insertUpdate == InsertUpdate.UPDATE) || (insertUpdate == InsertUpdate.UPSERT && id != null);
 		if (update) {
 			if (id == null) {
 				throw new RepositoryException("Require id to update");
@@ -370,10 +396,6 @@ public class EntityManager {
 				row.setIdColumns(new String[] { meta.idField.columnName, meta.versionField.columnName });
 				row.setIdValues(new Object[] { id, version });
 			}
-			if (insertUpdate == InsertUpdate.UPSERT && meta.idInfo.strategy() == IdStrategy.PROVIDED
-					&& meta.versionField == null) {
-				upsert = true;
-			}
 		} else {
 			Id idInfo = meta.idInfo;
 			if (idInfo != null && idInfo.strategy() == IdStrategy.INCREMENT) {
@@ -381,7 +403,11 @@ public class EntityManager {
 			}
 		}
 		Map<String, Object> doc = new HashMap<>();
+		// 插入或更新数据
 		row.setData(doc);
+		// 动态更新或者插入
+		boolean upsert = insertUpdate == InsertUpdate.UPSERT && meta.idInfo.strategy() == IdStrategy.PROVIDED
+				&& (id != null);
 		Map<String, Object> upsertDoc = null;
 		if (upsert) {
 			upsertDoc = new HashMap<>();
@@ -392,41 +418,54 @@ public class EntityManager {
 		}
 		for (EntityField field : meta.normalFields) {
 			Column column = field.column;
-			Object columnValue = null;
-			boolean columnValueGot = false;
+			boolean columnToSave;
 			if (fields != null) {
 				// 指定字段插入或更新
 				if (!fields.contains(field.fieldName)) {
 					continue;
 				}
+				columnToSave = true;
 			} else {
-				// 更新不成插入
-				if (upsert) {
-					if (column.insertable()) {
-						if (!columnValueGot) {
-							columnValue = field.getColumnValue(entity, context, defaultFieldConverter);
-							columnValueGot = true;
-						}
-						setColumn(upsertDoc, field, columnValue);
-					}
-				}
-				// 仅更新
 				if (update) {
-					if (!column.updatable()) {
-						continue;
-					}
-				}
-				// 仅插入
-				else if (!column.insertable()) {
-					continue;
+					columnToSave = column.updatable();
+				} else {
+					columnToSave = column.insertable();
 				}
 			}
-			if (update && field == meta.versionField) {
-				doc.put("$inc", Collections.singletonMap(field.columnName, 1));
+			boolean columnToUpsert = upsert && column.insertable();
+			if (!columnToSave && !columnToUpsert) {
+				continue;
+			}
+			if (field == meta.versionField) {
+				// 版本字段写入
+				if (!update || columnToUpsert) {
+					Object version = field.getFieldValue(entity);
+					// 如果插入时不指定版本号，自动生成
+					if (version == null) {
+						version = field.initVersionValue();
+						row.setInsertedVersion(version);
+					}
+					if (!update) {
+						setColumn(doc, field, version);
+					}
+					if (columnToUpsert) {
+						setColumn(upsertDoc, field, version);
+					}
+				}
+				if (update) {
+					// 更新版本号
+					row.setUpdatedVersion(field.makeNextVersionValue(entity));
+					setColumn(doc, field, row.getUpdatedVersion());
+				}
 			} else {
-				columnValue = columnValueGot ? columnValue
-						: field.getColumnValue(entity, context, defaultFieldConverter);
-				setColumn(doc, field, columnValue);
+				// 普通字段写入
+				Object columnValue = field.getColumnValue(entity, context, defaultFieldConverter);
+				if (columnToSave) {
+					setColumn(doc, field, columnValue);
+				}
+				if (columnToUpsert) {
+					setColumn(upsertDoc, field, columnValue);
+				}
 			}
 		}
 		if (!update && id != null) {
@@ -534,6 +573,11 @@ public class EntityManager {
 			throw new RepositoryException("No version field");
 		}
 		return fieldValue;
+	}
+
+	public static void setVersionValue(Object entity, Object newVersion) throws RepositoryException {
+		EntityMeta meta = getEntityMetaOf(entity.getClass());
+		meta.versionField.setFieldValue(entity, newVersion);
 	}
 
 	public static Set<String> findColumnNames(Class<?> clazz, Set<String> fields) {

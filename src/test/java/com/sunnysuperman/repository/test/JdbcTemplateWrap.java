@@ -8,13 +8,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import com.sunnysuperman.repository.db.LogAwareJdbcTemplate;
 import com.zaxxer.hikari.HikariDataSource;
 
-public class TestJdbcTemplate {
+public class JdbcTemplateWrap {
 	private static JdbcTemplate jdbcTemplate;
 
 	public static JdbcTemplate get() throws IOException {
 		if (jdbcTemplate == null) {
 			Properties props = new Properties();
-			props.load(TestJdbcTemplate.class.getResourceAsStream("test.properties"));
+			props.load(JdbcTemplateWrap.class.getResourceAsStream("test.properties"));
 
 			HikariDataSource ds = new HikariDataSource();
 			ds.setDriverClassName("com.mysql.cj.jdbc.Driver");

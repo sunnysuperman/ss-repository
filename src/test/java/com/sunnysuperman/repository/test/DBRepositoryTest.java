@@ -436,6 +436,25 @@ public class DBRepositoryTest {
 			assertTrue(entity2.getVersion() == 2);
 			assertTrue(entity2.getVal().equals(entity.getVal()));
 		}
+		// 仅更新版本号
+		{
+			IntVerionAwareEntity entity = new IntVerionAwareEntity();
+			entity.setVal(makeValue());
+			repo.insert(entity);
+
+			IntVerionAwareEntity entity2 = repo.findById(entity.getId());
+			assertTrue(entity2.getVersion() == 1);
+			repo.compareAndUpdateVersion(entity2);
+			assertTrue(entity2.getVersion() == 2);
+
+			IntVerionAwareEntity entity3 = repo.findById(entity.getId());
+			assertTrue(entity3.getVersion() == 2);
+			repo.update(entity3, Collections.singleton("version"));
+			assertTrue(entity3.getVersion() == 3);
+
+			IntVerionAwareEntity entity4 = repo.findById(entity.getId());
+			assertTrue(entity4.getVersion() == 3);
+		}
 	}
 
 	@Test

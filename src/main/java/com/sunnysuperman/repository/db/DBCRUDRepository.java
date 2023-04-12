@@ -218,6 +218,11 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 	}
 
 	@Override
+	public final void compareAndUpdateVersion(T entity) throws RepositoryException {
+		update(entity, Collections.emptySet());
+	}
+
+	@Override
 	public boolean deleteById(ID id) throws RepositoryException {
 		if (deleteByIdSql == null) {
 			deleteByIdSql = new StringBuilder("delete from ").append(getTable()).append(" where ")

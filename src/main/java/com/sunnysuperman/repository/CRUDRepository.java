@@ -17,6 +17,8 @@ public interface CRUDRepository<T, ID> {
 
 	boolean update(T entity, Set<String> fields) throws RepositoryException;
 
+	void compareAndUpdateVersion(T entity) throws RepositoryException;
+
 	boolean deleteById(ID id) throws RepositoryException;
 
 	int deleteByIds(Collection<ID> ids) throws RepositoryException;

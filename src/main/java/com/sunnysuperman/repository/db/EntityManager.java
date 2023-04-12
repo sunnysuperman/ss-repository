@@ -417,6 +417,10 @@ public class EntityManager {
 			row.setUpsertData(upsertDoc);
 		}
 		for (EntityField field : meta.normalFields) {
+			// 版本号单独处理
+			if (field == meta.versionField) {
+				continue;
+			}
 			Column column = field.column;
 			boolean columnToSave;
 			if (fields != null) {
@@ -436,40 +440,40 @@ public class EntityManager {
 			if (!columnToSave && !columnToUpsert) {
 				continue;
 			}
-			if (field == meta.versionField) {
-				// 版本字段写入
-				if (!update || columnToUpsert) {
-					Object version = field.getFieldValue(entity);
-					// 如果插入时不指定版本号，自动生成
-					if (version == null) {
-						version = field.initVersionValue();
-						row.setInsertedVersion(version);
-					}
-					if (!update) {
-						setColumn(doc, field, version);
-					}
-					if (columnToUpsert) {
-						setColumn(upsertDoc, field, version);
-					}
-				}
-				if (update) {
-					// 更新版本号
-					row.setUpdatedVersion(field.makeNextVersionValue(entity));
-					setColumn(doc, field, row.getUpdatedVersion());
-				}
-			} else {
-				// 普通字段写入
-				Object columnValue = field.getColumnValue(entity, context, defaultFieldConverter);
-				if (columnToSave) {
-					setColumn(doc, field, columnValue);
-				}
-				if (columnToUpsert) {
-					setColumn(upsertDoc, field, columnValue);
-				}
+			// 普通字段写入
+			Object columnValue = field.getColumnValue(entity, context, defaultFieldConverter);
+			if (columnToSave) {
+				setColumn(doc, field, columnValue);
+			}
+			if (columnToUpsert) {
+				setColumn(upsertDoc, field, columnValue);
 			}
 		}
 		if (!update && id != null) {
 			doc.put(meta.idField.columnName, id);
+		}
+		// 版本字段写入
+		if (meta.versionField != null) {
+			EntityField field = meta.versionField;
+			if (!update || upsert) {
+				Object version = field.getFieldValue(entity);
+				// 如果插入时不指定版本号，自动生成
+				if (version == null) {
+					version = field.initVersionValue();
+					row.setInsertedVersion(version);
+				}
+				if (!update) {
+					setColumn(doc, field, version);
+				}
+				if (upsert) {
+					setColumn(upsertDoc, field, version);
+				}
+			}
+			if (update) {
+				// 更新版本号
+				row.setUpdatedVersion(field.makeNextVersionValue(entity));
+				setColumn(doc, field, row.getUpdatedVersion());
+			}
 		}
 		return row;
 	}

@@ -218,7 +218,7 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 	}
 
 	@Override
-	public final void compareAndUpdateVersion(T entity) throws RepositoryException {
+	public void compareAndUpdateVersion(T entity) throws RepositoryException {
 		update(entity, Collections.emptySet());
 	}
 

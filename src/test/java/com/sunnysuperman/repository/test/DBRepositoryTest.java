@@ -525,6 +525,29 @@ public class DBRepositoryTest {
 	}
 
 	@Test
+	public void test_versioning3() throws Exception {
+		DBCRUDRepository<IntVerionAwareEntity, Long> repo = getCRUDRepository(IntVerionAwareEntity.class, Long.class);
+
+		IntVerionAwareEntity a = new IntVerionAwareEntity();
+		a.setVal("a1");
+		repo.insert(a);
+		assertTrue(a.getId() != null);
+
+		IntVerionAwareEntity a2 = repo.findById(a.getId());
+		a2.setVal("a2");
+		repo.save(a2);
+		assertTrue(a2.getVersion().intValue() == a.getVersion().intValue() + 1);
+
+		try {
+			a.setVal("a3");
+			repo.save(a);
+			assertTrue(false);
+		} catch (StaleEntityRepositoryException e) {
+			e.printStackTrace();
+		}
+	}
+
+	@Test
 	public void test_concurrentUpdate() throws Exception {
 		DBCRUDRepository<IntVerionAwareEntity, Long> repo = getCRUDRepository(IntVerionAwareEntity.class, Long.class);
 

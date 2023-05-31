@@ -148,10 +148,6 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 			}
 			boolean updated = updateDoc(tableName, data, row.getIdColumns(), row.getIdValues()) > 0;
 			if (updated || insertUpdate == InsertUpdate.UPDATE) {
-				if (!updated && row.isVersioning()) {
-					throw new StaleEntityRepositoryException("Failed to update entity for "
-							+ StringUtil.join(row.getIdColumns()) + "/" + StringUtil.join(row.getIdValues()));
-				}
 				result.setUpdated(updated);
 				return result;
 			}
@@ -163,8 +159,15 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 			}
 			return result;
 		} finally {
-			// 保存成功，版本号需要更新到实体
-			if (row.isVersioning() && result.success()) {
+			// 版本控制
+			if (row.isVersioning()) {
+				// 如果未能保存，需要抛出相关异常
+				if (!result.success()) {
+					throw new StaleEntityRepositoryException("Failed to update entity for " + row.getTableName() + "/"
+							+ StringUtil.join(row.getIdColumns()) + "/" + StringUtil.join(row.getIdValues())
+							+ ", maybe entity is stale");
+				}
+				// 保存成功，版本号需要更新到实体
 				if (result.isUpdated()) {
 					EntityManager.setVersionValue(entity, row.getUpdatedVersion());
 				} else if (row.getInsertedVersion() != null) {

@@ -13,13 +13,12 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
+import org.reflections.Reflections;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.sunnysuperman.commons.util.FormatUtil;
 import com.sunnysuperman.commons.util.StringUtil;
-import com.sunnysuperman.repository.ClassFinder;
-import com.sunnysuperman.repository.ClassFinder.ClassFilter;
 import com.sunnysuperman.repository.FieldConverter;
 import com.sunnysuperman.repository.FieldValue;
 import com.sunnysuperman.repository.InsertUpdate;
@@ -39,16 +38,7 @@ public class EntityManager {
 	private static final Logger LOG = LoggerFactory.getLogger(EntityManager.class);
 	private static final Long VERSION_LONG_1 = 1L;
 	private static final Integer VERSION_INT_1 = 1;
-	private static Map<Class<?>, EntityMeta> META_MAP = new ConcurrentHashMap<>();
-
-	private static class EntityClassFilter implements ClassFilter {
-
-		@Override
-		public boolean filter(Class<?> clazz) {
-			return clazz.isAnnotationPresent(Entity.class);
-		}
-
-	}
+	private static Map<Class<?>, EntityMeta> metaMap = new ConcurrentHashMap<>();
 
 	protected static class EntityMeta {
 		protected List<EntityField> normalFields;
@@ -330,26 +320,26 @@ public class EntityManager {
 
 	public static void scan(String packageName) throws Exception {
 		long t1 = System.nanoTime();
-		Set<Class<?>> classes = ClassFinder.find(packageName, new EntityClassFilter());
+		Set<Class<?>> classes = new Reflections(packageName).getTypesAnnotatedWith(Entity.class, true);
 		for (Class<?> clazz : classes) {
 			loadEntity(clazz);
 		}
 		if (LOG.isInfoEnabled()) {
 			long t2 = System.nanoTime();
-			LOG.info("Entity scanning for package {} took {}ms, {} entities found", packageName,
-					TimeUnit.NANOSECONDS.toMillis(t2 - t1), classes.size());
+			LOG.info("Entity scanning for package {} took {}ms, {} entities found, {}", packageName,
+					TimeUnit.NANOSECONDS.toMillis(t2 - t1), classes.size(), classes);
 		}
 	}
 
 	private static EntityMeta loadEntity(Class<?> clazz) throws Exception {
 		Entity entity = clazz.getAnnotation(Entity.class);
 		EntityMeta meta = makeSerializeMeta(clazz, entity);
-		META_MAP.put(clazz, meta);
+		metaMap.put(clazz, meta);
 		return meta;
 	}
 
 	private static EntityMeta getEntityMetaOf(Class<?> clazz) {
-		EntityMeta meta = META_MAP.get(clazz);
+		EntityMeta meta = metaMap.get(clazz);
 		if (meta == null) {
 			LOG.warn("Lazy load entity {}", clazz);
 			try {

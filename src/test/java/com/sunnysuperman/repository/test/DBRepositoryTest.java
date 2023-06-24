@@ -1,5 +1,7 @@
 package com.sunnysuperman.repository.test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -240,7 +242,7 @@ public class DBRepositoryTest {
 	}
 
 	@Test
-	public void test_insertDoc() throws Exception {
+	void insertDoc() throws Exception {
 		DBRepository repo = get();
 
 		{
@@ -268,7 +270,7 @@ public class DBRepositoryTest {
 	}
 
 	@Test
-	public void test_insertDocs() throws Exception {
+	void insertDocs() throws Exception {
 		DBRepository repo = get();
 		long currentId = getCurrentAutoIncrementId();
 
@@ -300,7 +302,7 @@ public class DBRepositoryTest {
 	}
 
 	@Test
-	public void test_insertEntity() throws Exception {
+	void insertEntity() throws Exception {
 		DBCRUDRepository<AutoIncrementIdAwareEntity, Long> repo = getCRUDRepository(AutoIncrementIdAwareEntity.class,
 				Long.class);
 		long currentId = getCurrentAutoIncrementId();
@@ -315,9 +317,14 @@ public class DBRepositoryTest {
 	}
 
 	@Test
-	public void test_insertEntityBatch() throws Exception {
+	void insertEntityBatch() throws Exception {
 		DBCRUDRepository<AutoIncrementIdAwareEntity, Long> repo = getCRUDRepository(AutoIncrementIdAwareEntity.class,
 				Long.class);
+		{
+			AutoIncrementIdAwareEntity e = new AutoIncrementIdAwareEntity();
+			e.setVal("xx");
+			repo.insert(e);
+		}
 		long currentId = getCurrentAutoIncrementId();
 
 		List<AutoIncrementIdAwareEntity> entityList = new ArrayList<>();
@@ -336,7 +343,7 @@ public class DBRepositoryTest {
 	}
 
 	@Test
-	public void test_insertAndUpdate() throws Exception {
+	void insertAndUpdate() throws Exception {
 		DBCRUDRepository<InsertUpdateAwareEntity, Long> repo = getCRUDRepository(InsertUpdateAwareEntity.class,
 				Long.class);
 
@@ -389,7 +396,7 @@ public class DBRepositoryTest {
 	}
 
 	@Test
-	public void test_versioning1() throws Exception {
+	void versioning1() throws Exception {
 		DBCRUDRepository<IntVerionAwareEntity, Long> repo = getCRUDRepository(IntVerionAwareEntity.class, Long.class);
 
 		Long id;
@@ -458,7 +465,7 @@ public class DBRepositoryTest {
 	}
 
 	@Test
-	public void test_versioning2() throws Exception {
+	void versioning2() throws Exception {
 		DBCRUDRepository<LongVerionAwareEntity, Long> repo = getCRUDRepository(LongVerionAwareEntity.class, Long.class);
 
 		Long id = 100L;
@@ -525,18 +532,18 @@ public class DBRepositoryTest {
 	}
 
 	@Test
-	public void test_versioning3() throws Exception {
+	void versioning3() throws Exception {
 		DBCRUDRepository<IntVerionAwareEntity, Long> repo = getCRUDRepository(IntVerionAwareEntity.class, Long.class);
 
 		IntVerionAwareEntity a = new IntVerionAwareEntity();
 		a.setVal("a1");
 		repo.insert(a);
-		assertTrue(a.getId() != null);
+		assertNotNull(a.getId());
 
 		IntVerionAwareEntity a2 = repo.findById(a.getId());
 		a2.setVal("a2");
 		repo.save(a2);
-		assertTrue(a2.getVersion().intValue() == a.getVersion().intValue() + 1);
+		assertEquals(a2.getVersion().intValue(), a.getVersion().intValue() + 1);
 
 		try {
 			a.setVal("a3");
@@ -548,7 +555,7 @@ public class DBRepositoryTest {
 	}
 
 	@Test
-	public void test_concurrentUpdate() throws Exception {
+	void concurrentUpdate() throws Exception {
 		DBCRUDRepository<IntVerionAwareEntity, Long> repo = getCRUDRepository(IntVerionAwareEntity.class, Long.class);
 
 		Long id = 100L;
@@ -582,6 +589,50 @@ public class DBRepositoryTest {
 		IntVerionAwareEntity entity3 = repo.findById(id);
 		entity3.setVal(entity2.getVal());
 		repo.update(entity3);
+	}
+
+	@Test
+	void delete() throws Exception {
+		DBCRUDRepository<AutoIncrementIdAwareEntity, Long> repo = getCRUDRepository(AutoIncrementIdAwareEntity.class,
+				Long.class);
+
+		AutoIncrementIdAwareEntity a1 = new AutoIncrementIdAwareEntity();
+		a1.setVal("a1");
+		repo.insert(a1);
+		assertNotNull(a1.getId());
+
+		AutoIncrementIdAwareEntity a2 = repo.findById(a1.getId());
+		a2.setVal("a2");
+		repo.update(a2);
+		assertEquals(a2.getId(), a1.getId());
+
+		assertTrue(repo.delete(a1));
+		assertTrue(!repo.delete(a1));
+		assertTrue(!repo.delete(a2));
+	}
+
+	@Test
+	void deleteVersionAwareEntity() throws Exception {
+		DBCRUDRepository<IntVerionAwareEntity, Long> repo = getCRUDRepository(IntVerionAwareEntity.class, Long.class);
+
+		IntVerionAwareEntity a1 = new IntVerionAwareEntity();
+		a1.setVal("a1");
+		repo.insert(a1);
+		assertNotNull(a1.getId());
+
+		IntVerionAwareEntity a2 = repo.findById(a1.getId());
+		a2.setVal("a2");
+		repo.update(a2);
+		assertEquals(a2.getId(), a1.getId());
+
+		try {
+			repo.delete(a1);
+			assertTrue(false);
+		} catch (StaleEntityRepositoryException e) {
+			e.printStackTrace();
+		}
+
+		assertTrue(repo.delete(a2));
 	}
 
 	private String makeValue() {

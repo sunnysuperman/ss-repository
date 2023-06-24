@@ -33,7 +33,7 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 	private String findByIdSql;
 	private String findAllSql;
 	private String deleteByIdSql;
-	private VersionAwareSql deleteByIdAndVersionSql;
+	private String deleteByIdAndVersionSql;
 	private String existsByIdSql;
 	private Map<String, String> fieldColumnMapping = new ConcurrentHashMap<>();
 
@@ -122,59 +122,61 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 		} catch (Exception ex) {
 			throw new RepositoryException(ex);
 		}
-		String tableName = row.getTableName();
+		SaveResult result = doSave(row, entity, insertUpdate);
+		// 版本控制
+		if (row.isVersioning()) {
+			// 如果未能保存，需要抛出相关异常
+			if (!result.success()) {
+				throw new StaleEntityRepositoryException(
+						"Failed to update entity for " + row.getTableName() + "/" + StringUtil.join(row.getIdColumns())
+								+ "/" + StringUtil.join(row.getIdValues()) + ", maybe entity is stale");
+			}
+			// 保存成功，版本号需要更新到实体
+			if (result.isUpdated()) {
+				EntityManager.setVersionValue(entity, row.getUpdatedVersion());
+			} else if (row.getInsertedVersion() != null) {
+				EntityManager.setVersionValue(entity, row.getInsertedVersion());
+			}
+		}
+		return result;
+	}
+
+	private SaveResult doSave(SerializedRow row, T entity, InsertUpdate insertUpdate) {
 		SaveResult result = new SaveResult();
 		Map<String, Object> data = row.getData();
-		try {
-			// insert
-			if (insertUpdate == InsertUpdate.INSERT || row.getIdValues() == null) {
-				if (row.isIdGeneration()) {
-					Number id = insertDoc(tableName, data, Number.class);
-					if (id == null) {
-						throw new RepositoryException("Failed to insert and generate id");
-					}
-					// 设置ID到实体，同时回显到结果里
-					result.setGeneratedId(EntityManager.setEntityId(entity, id, getDefaultFieldConverter()));
-					result.setInserted(true);
-				} else {
-					boolean inserted = insertDoc(tableName, data);
-					result.setInserted(inserted);
+		String tableName = row.getTableName();
+		// insert
+		if (insertUpdate == InsertUpdate.INSERT || row.getIdValues() == null) {
+			if (row.isIdGeneration()) {
+				Number id = insertDoc(tableName, data, Number.class);
+				if (id == null) {
+					throw new RepositoryException("Failed to insert and generate id");
 				}
-				return result;
-			}
-			// update
-			if (row.getIdValues() == null) {
-				throw new RepositoryException("Require id to update");
-			}
-			boolean updated = updateDoc(tableName, data, row.getIdColumns(), row.getIdValues()) > 0;
-			if (updated || insertUpdate == InsertUpdate.UPDATE) {
-				result.setUpdated(updated);
-				return result;
-			}
-			// upsert
-			Map<String, Object> upsertData = row.getUpsertData();
-			if (upsertData != null) {
-				boolean inserted = insertDoc(tableName, upsertData);
+				// 设置ID到实体，同时回显到结果里
+				result.setGeneratedId(EntityManager.setEntityId(entity, id, getDefaultFieldConverter()));
+				result.setInserted(true);
+			} else {
+				boolean inserted = insertDoc(tableName, data);
 				result.setInserted(inserted);
 			}
 			return result;
-		} finally {
-			// 版本控制
-			if (row.isVersioning()) {
-				// 如果未能保存，需要抛出相关异常
-				if (!result.success()) {
-					throw new StaleEntityRepositoryException("Failed to update entity for " + row.getTableName() + "/"
-							+ StringUtil.join(row.getIdColumns()) + "/" + StringUtil.join(row.getIdValues())
-							+ ", maybe entity is stale");
-				}
-				// 保存成功，版本号需要更新到实体
-				if (result.isUpdated()) {
-					EntityManager.setVersionValue(entity, row.getUpdatedVersion());
-				} else if (row.getInsertedVersion() != null) {
-					EntityManager.setVersionValue(entity, row.getInsertedVersion());
-				}
-			}
 		}
+		// update
+		if (row.getIdValues() == null) {
+			throw new RepositoryException("Require id to update");
+		}
+		boolean updated = updateDoc(tableName, data, row.getIdColumns(), row.getIdValues()) > 0;
+		if (updated || insertUpdate == InsertUpdate.UPDATE) {
+			result.setUpdated(updated);
+			return result;
+		}
+		// upsert
+		Map<String, Object> upsertData = row.getUpsertData();
+		if (upsertData != null) {
+			boolean inserted = insertDoc(tableName, upsertData);
+			result.setInserted(inserted);
+		}
+		return result;
 	}
 
 	@Override
@@ -256,15 +258,20 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 			if (versionField != null) {
 				sql.append(" and ").append(versionField.getColumnName()).append("=?");
 			}
-			deleteByIdAndVersionSql = new VersionAwareSql(sql.toString(), versionField != null);
+			deleteByIdAndVersionSql = sql.toString();
 		}
 		Object[] params;
-		if (deleteByIdAndVersionSql.isHasVesion()) {
+		if (versionField != null) {
 			params = new Object[] { idField.getColumnValue(), versionField.getColumnValue() };
 		} else {
 			params = new Object[] { idField.getColumnValue() };
 		}
-		return execute(deleteByIdAndVersionSql.getSql(), params) > 0;
+		boolean updated = execute(deleteByIdAndVersionSql, params) > 0;
+		if (!updated && versionField != null) {
+			throw new StaleEntityRepositoryException("Failed to delete entity for " + entity.getClass() + "/"
+					+ idField.getColumnValue() + ", maybe entity is stale");
+		}
+		return updated;
 	}
 
 	@Override

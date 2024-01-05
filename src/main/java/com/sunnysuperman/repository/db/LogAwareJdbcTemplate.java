@@ -91,8 +91,6 @@ public class LogAwareJdbcTemplate extends JdbcTemplate {
 				long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
 				if (psc instanceof GeneratKeysPreparedStatementCreator) {
 					LOG.info("[Jdbc] {}, take {} ms", ((GeneratKeysPreparedStatementCreator) psc).getSql(), take);
-				} else {
-					LOG.info("[Jdbc] {}, take {} ms", psc.toString(), take);
 				}
 			}
 		}

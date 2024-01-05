@@ -13,12 +13,12 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
-import org.reflections.Reflections;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.sunnysuperman.commons.util.FormatUtil;
 import com.sunnysuperman.commons.util.StringUtil;
+import com.sunnysuperman.commons.util.TypeFinder;
 import com.sunnysuperman.repository.FieldConverter;
 import com.sunnysuperman.repository.FieldValue;
 import com.sunnysuperman.repository.InsertUpdate;
@@ -319,14 +319,18 @@ public class EntityManager {
 	}
 
 	public static void scan(String packageName) throws Exception {
+		scan(new String[] { packageName });
+	}
+
+	public static void scan(String[] packageNames) throws Exception {
 		long t1 = System.nanoTime();
-		Set<Class<?>> classes = new Reflections(packageName).getTypesAnnotatedWith(Entity.class, true);
+		Set<Class<?>> classes = TypeFinder.findTypesAnnotatedWith(packageNames, Entity.class);
 		for (Class<?> clazz : classes) {
 			loadEntity(clazz);
 		}
 		if (LOG.isInfoEnabled()) {
 			long t2 = System.nanoTime();
-			LOG.info("Entity scanning for package {} took {}ms, {} entities found, {}", packageName,
+			LOG.info("Entity scanning for package {} took {}ms, {} entities found, {}", packageNames,
 					TimeUnit.NANOSECONDS.toMillis(t2 - t1), classes.size(), classes);
 		}
 	}

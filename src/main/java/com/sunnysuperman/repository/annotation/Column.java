@@ -13,9 +13,19 @@ public @interface Column {
 
 	String name() default StringUtil.EMPTY;
 
+	boolean nullable() default true;
+
 	boolean insertable() default true;
 
 	boolean updatable() default true;
+
+	int length() default 255;
+
+	int precision() default 2;
+
+	String comment() default StringUtil.EMPTY;
+
+	String[] columnDefinition() default {};
 
 	Class<?> converter() default void.class;
 

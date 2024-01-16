@@ -5,13 +5,11 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-import com.sunnysuperman.commons.util.StringUtil;
-
 @Target({ ElementType.FIELD })
 @Retention(RetentionPolicy.RUNTIME)
 public @interface Column {
 
-	String name() default StringUtil.EMPTY;
+	String name() default "";
 
 	boolean nullable() default true;
 
@@ -23,7 +21,7 @@ public @interface Column {
 
 	int precision() default 2;
 
-	String comment() default StringUtil.EMPTY;
+	String comment() default "";
 
 	String[] columnDefinition() default {};
 

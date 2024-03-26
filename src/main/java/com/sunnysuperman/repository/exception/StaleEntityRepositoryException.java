@@ -2,6 +2,7 @@ package com.sunnysuperman.repository.exception;
 
 import com.sunnysuperman.repository.RepositoryException;
 
+@SuppressWarnings("serial")
 public class StaleEntityRepositoryException extends RepositoryException {
 
 	public StaleEntityRepositoryException() {

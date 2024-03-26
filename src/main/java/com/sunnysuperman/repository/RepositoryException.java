@@ -1,5 +1,6 @@
 package com.sunnysuperman.repository;
 
+@SuppressWarnings("serial")
 public class RepositoryException extends RuntimeException {
 
 	public RepositoryException() {

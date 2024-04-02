@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-public interface CRUDRepository<T, ID> {
+public interface CRUDRepository<T, I> {
 
 	SaveResult save(T entity) throws RepositoryException;
 
@@ -17,23 +17,29 @@ public interface CRUDRepository<T, ID> {
 
 	boolean update(T entity, Set<String> fields) throws RepositoryException;
 
+	boolean updateBatch(List<T> entityList) throws RepositoryException;
+
+	boolean updateBatch(List<T> entityList, Set<String> fields) throws RepositoryException;
+
 	void compareAndUpdateVersion(T entity) throws RepositoryException;
 
-	boolean deleteById(ID id) throws RepositoryException;
+	boolean deleteById(I id) throws RepositoryException;
 
-	int deleteByIds(Collection<ID> ids) throws RepositoryException;
+	int deleteByIds(Collection<I> ids) throws RepositoryException;
 
 	boolean delete(T entity) throws RepositoryException;
 
-	boolean existsById(ID id) throws RepositoryException;
+	boolean existsById(I id) throws RepositoryException;
 
-	T findById(ID id) throws RepositoryException;
+	T findById(I id) throws RepositoryException;
 
-	List<T> findByIds(Collection<ID> ids) throws RepositoryException;
+	T getById(I id) throws RepositoryException;
 
-	List<T> findByIdsInOrder(Collection<ID> ids) throws RepositoryException;
+	List<T> findByIds(Collection<I> ids) throws RepositoryException;
 
-	Map<ID, T> findByIdsAsMap(Collection<ID> ids) throws RepositoryException;
+	List<T> findByIdsInOrder(Collection<I> ids) throws RepositoryException;
+
+	Map<I, T> findByIdsAsMap(Collection<I> ids) throws RepositoryException;
 
 	List<T> findAll() throws RepositoryException;
 }

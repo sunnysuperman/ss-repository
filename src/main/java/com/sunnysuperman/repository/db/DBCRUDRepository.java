@@ -2,6 +2,7 @@ package com.sunnysuperman.repository.db;
 
 import java.lang.reflect.ParameterizedType;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -9,6 +10,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -19,32 +21,24 @@ import com.sunnysuperman.commons.page.PullPageRequest;
 import com.sunnysuperman.commons.util.StringUtil;
 import com.sunnysuperman.repository.CRUDRepository;
 import com.sunnysuperman.repository.FieldValue;
-import com.sunnysuperman.repository.InsertUpdate;
 import com.sunnysuperman.repository.RepositoryException;
 import com.sunnysuperman.repository.SaveResult;
+import com.sunnysuperman.repository.annotation.IdStrategy;
 import com.sunnysuperman.repository.db.mapper.DBMapper;
+import com.sunnysuperman.repository.db.mapper.EntityMapper;
 import com.sunnysuperman.repository.db.mapper.ObjectDBMapper;
 import com.sunnysuperman.repository.exception.StaleEntityRepositoryException;
 
-public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CRUDRepository<T, ID> {
+public abstract class DBCRUDRepository<T, I> extends DBRepository implements CRUDRepository<T, I> {
 	private Class<T> entityClass;
 	private DBMapper<T> entityMapper;
-	private String table;
+	private EntityMeta entityMeta;
 	private String findByIdSql;
 	private String findAllSql;
 	private String deleteByIdSql;
 	private String deleteByIdAndVersionSql;
 	private String existsByIdSql;
 	private Map<String, String> fieldColumnMapping = new ConcurrentHashMap<>();
-
-	private final class TheEntityMapper implements DBMapper<T> {
-
-		@Override
-		public T map(Map<String, Object> row) {
-			return EntityManager.deserialize(row, getEntityClass(), getDefaultFieldConverter());
-		}
-
-	}
 
 	@SuppressWarnings("unchecked")
 	protected Class<T> getEntityClass() {
@@ -55,18 +49,19 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 		return entityClass;
 	}
 
-	protected DBMapper<T> getEntityMapper() {
+	protected final DBMapper<T> getEntityMapper() {
 		if (entityMapper == null) {
-			entityMapper = new TheEntityMapper();
+			entityMapper = new EntityMapper<>(getEntityClass(), getDefaultFieldConverter());
 		}
 		return entityMapper;
 	}
 
+	protected final <M> DBMapper<M> getEntityMapper(Class<M> clazz) {
+		return new EntityMapper<>(clazz, getDefaultFieldConverter());
+	}
+
 	protected final String getTable() {
-		if (table == null) {
-			table = EntityManager.getTable(getEntityClass());
-		}
-		return table;
+		return getEntityMeta().tableName;
 	}
 
 	protected final String getColumnsByFields(String fields) {
@@ -76,7 +71,7 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 		String columns = fieldColumnMapping.get(fields);
 		if (columns == null) {
 			Set<String> fieldSet = new HashSet<>(StringUtil.split(fields, ","));
-			Set<String> columnSet = EntityManager.findColumnNames(getEntityClass(), fieldSet);
+			Set<String> columnSet = getEntityMeta().getColumnNames(fieldSet);
 			if (columnSet.size() < fieldSet.size()) {
 				throw new RepositoryException("Some columns not found for " + StringUtil.join(fields));
 			}
@@ -87,13 +82,13 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 	}
 
 	@SuppressWarnings("unchecked")
-	protected final Map<ID, T> list2map(List<T> list) {
+	protected final Map<I, T> list2map(List<T> list) {
 		if (list.isEmpty()) {
 			return Collections.emptyMap();
 		}
-		Map<ID, T> map = new HashMap<>();
+		Map<I, T> map = new HashMap<>();
 		for (T item : list) {
-			map.put((ID) EntityManager.getEntityId(item), item);
+			map.put((I) getEntityMeta().getEntityId(item), item);
 		}
 		return map;
 	}
@@ -102,159 +97,118 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 		return BuildInDefautFieldConverter.getInstance();
 	}
 
-	private static StringBuilder appendInClause(StringBuilder sql, Collection<?> items) {
-		sql.append(" in(");
-		for (int i = 0; i < items.size(); i++) {
-			if (i > 0) {
-				sql.append(",?");
-			} else {
-				sql.append('?');
-			}
-		}
-		sql.append(')');
-		return sql;
-	}
-
-	private SaveResult save(T entity, Set<String> fields, InsertUpdate insertUpdate) {
-		SerializedRow row;
-		try {
-			row = EntityManager.serialize(entity, fields, insertUpdate, getDefaultFieldConverter());
-		} catch (Exception ex) {
-			throw new RepositoryException(ex);
-		}
-		SaveResult result = doSave(row, entity, insertUpdate);
-		// 版本控制
-		if (row.isVersioning()) {
-			// 如果未能保存，需要抛出相关异常
-			if (!result.success()) {
-				throw new StaleEntityRepositoryException(
-						"Failed to update entity for " + row.getTableName() + "/" + StringUtil.join(row.getIdColumns())
-								+ "/" + StringUtil.join(row.getIdValues()) + ", maybe entity is stale");
-			}
-			// 保存成功，版本号需要更新到实体
-			if (result.isUpdated()) {
-				EntityManager.setVersionValue(entity, row.getUpdatedVersion());
-			} else if (row.getInsertedVersion() != null) {
-				EntityManager.setVersionValue(entity, row.getInsertedVersion());
-			}
-		}
-		return result;
-	}
-
-	private SaveResult doSave(SerializedRow row, T entity, InsertUpdate insertUpdate) {
-		SaveResult result = new SaveResult();
-		Map<String, Object> data = row.getData();
-		String tableName = row.getTableName();
-		// insert
-		if (insertUpdate == InsertUpdate.INSERT || row.getIdValues() == null) {
-			if (row.isIdGeneration()) {
-				Number id = insertDoc(tableName, data, Number.class);
-				if (id == null) {
-					throw new RepositoryException("Failed to insert and generate id");
-				}
-				// 设置ID到实体，同时回显到结果里
-				result.setGeneratedId(EntityManager.setEntityId(entity, id, getDefaultFieldConverter()));
-				result.setInserted(true);
-			} else {
-				boolean inserted = insertDoc(tableName, data);
-				result.setInserted(inserted);
-			}
-			return result;
-		}
-		// update
-		if (row.getIdValues() == null) {
-			throw new RepositoryException("Require id to update");
-		}
-		boolean updated = updateDoc(tableName, data, row.getIdColumns(), row.getIdValues()) > 0;
-		if (updated || insertUpdate == InsertUpdate.UPDATE) {
-			result.setUpdated(updated);
-			return result;
-		}
-		// upsert
-		Map<String, Object> upsertData = row.getUpsertData();
-		if (upsertData != null) {
-			boolean inserted = insertDoc(tableName, upsertData);
-			result.setInserted(inserted);
-		}
-		return result;
-	}
-
 	@Override
 	public SaveResult save(T entity) throws RepositoryException {
-		return save(entity, null, InsertUpdate.UPSERT);
+		EntityMeta meta = getEntityMeta();
+		Object entityId = meta.getEntityId(entity);
+		if (entityId == null) {
+			insert(entity);
+			return SaveResult.RES_INSERTED;
+		}
+		boolean upsert = meta.idInfo.strategy() == IdStrategy.PROVIDED;
+		if (upsert) {
+			if (doUpdate(Collections.singletonList(entity), null, true)) {
+				return SaveResult.RES_UPDATED;
+			}
+			insert(entity);
+			return SaveResult.RES_INSERTED;
+		}
+		if (doUpdate(Collections.singletonList(entity), null, false)) {
+			return SaveResult.RES_UPDATED;
+		}
+		return SaveResult.RES_NONE;
 	}
 
 	@Override
 	public void insert(T entity) throws RepositoryException {
-		save(entity, null, InsertUpdate.INSERT);
+		doInsert(entity);
 	}
 
 	@Override
 	public void insertBatch(List<T> entityList) throws RepositoryException {
-		List<Map<String, Object>> docs = new ArrayList<>(entityList.size());
-		boolean idGeneration = false;
-		for (T item : entityList) {
-			SerializedRow row = EntityManager.serialize(item, null, InsertUpdate.INSERT, getDefaultFieldConverter());
-			idGeneration = row.isIdGeneration();
-			Map<String, Object> doc = row.getData();
-			docs.add(doc);
-		}
-		if (!idGeneration) {
-			insertDocs(getTable(), docs);
+		if (entityList.size() <= 1) {
+			doInsert(entityList.get(0));
 			return;
 		}
-		List<Number> ids = insertDocs(getTable(), docs, Number.class);
-		if (ids == null) {
-			return;
+		EntityMeta meta = getEntityMeta();
+		DefaultFieldConverter converter = getDefaultFieldConverter();
+		String sql = meta.getInsertSql(entityList.get(0), converter);
+		SaveParams insertParams = meta.getInsertParams(entityList, converter);
+		Class<?> generatedIdClass = meta.findGeneratedIdFieldType();
+		if (generatedIdClass == null) {
+			executeBatch(sql, insertParams.getParams());
+		} else {
+			List<?> generatedIds = getJdbcTemplate().execute(new GeneratKeysPreparedStatementCreator(sql),
+					new InsertBatchPreparedStatementCallback<>(insertParams.getParams(), generatedIdClass));
+			if (generatedIds == null || generatedIds.isEmpty()) {
+				throw new RepositoryException("No id generated");
+			}
+			// 生成ID回传
+			for (int i = 0; i < entityList.size(); i++) {
+				meta.setEntityId(entityList.get(i), generatedIds.get(i), converter);
+			}
 		}
-		for (int i = 0; i < entityList.size(); i++) {
-			EntityManager.setEntityId(entityList.get(i), ids.get(i), getDefaultFieldConverter());
+		// 版本号回传
+		if (insertParams.versioning()) {
+			for (int i = 0; i < entityList.size(); i++) {
+				meta.setVersionValue(entityList.get(i), insertParams.getNewVersions().get(i));
+			}
 		}
 	}
 
 	@Override
 	public boolean update(T entity) throws RepositoryException {
-		return save(entity, null, InsertUpdate.UPDATE).isUpdated();
+		return doUpdate(Collections.singletonList(entity), null, false);
 	}
 
 	@Override
 	public boolean update(T entity, Set<String> fields) throws RepositoryException {
-		return save(entity, fields, InsertUpdate.UPDATE).isUpdated();
+		return doUpdate(Collections.singletonList(entity), fields, false);
+	}
+
+	@Override
+	public boolean updateBatch(List<T> entityList) throws RepositoryException {
+		return doUpdate(entityList, null, false);
+	}
+
+	@Override
+	public boolean updateBatch(List<T> entityList, Set<String> fields) throws RepositoryException {
+		return doUpdate(entityList, fields, false);
 	}
 
 	@Override
 	public void compareAndUpdateVersion(T entity) throws RepositoryException {
-		update(entity, Collections.emptySet());
+		if (!doUpdate(Collections.singletonList(entity), Collections.emptySet(), false)) {
+			throw new RepositoryException("compareAndUpdateVersion failed");
+		}
 	}
 
 	@Override
-	public boolean deleteById(ID id) throws RepositoryException {
+	public boolean deleteById(I id) throws RepositoryException {
 		if (deleteByIdSql == null) {
-			deleteByIdSql = new StringBuilder("delete from ").append(getTable()).append(" where ")
-					.append(EntityManager.getIdColumnName(getEntityClass())).append("=?").toString();
+			deleteByIdSql = makeDeleteByIdSql().append("=?").toString();
 		}
 		return execute(deleteByIdSql, new Object[] { id }) > 0;
 	}
 
 	@Override
-	public int deleteByIds(Collection<ID> ids) throws RepositoryException {
+	public int deleteByIds(Collection<I> ids) throws RepositoryException {
 		if (ids.size() == 1) {
 			return deleteById(ids.iterator().next()) ? 1 : 0;
 		}
-		StringBuilder sql = new StringBuilder("delete from ").append(getTable()).append(" where ")
-				.append(EntityManager.getIdColumnName(getEntityClass()));
+		StringBuilder sql = makeDeleteByIdSql();
 		appendInClause(sql, ids);
 		return execute(sql.toString(), ids.toArray());
 	}
 
 	@Override
 	public boolean delete(T entity) throws RepositoryException {
-		FieldValue idField = EntityManager.findIdFieldAndValue(entity, getDefaultFieldConverter());
-		FieldValue versionField = EntityManager.findVersionFieldAndValue(entity, getDefaultFieldConverter());
+		EntityMeta meta = getEntityMeta();
+		FieldValue idField = meta.findIdFieldAndValue(entity, getDefaultFieldConverter());
+		FieldValue versionField = meta.findVersionFieldAndValue(entity, getDefaultFieldConverter());
 		// SQL缓存
 		if (deleteByIdAndVersionSql == null) {
-			StringBuilder sql = new StringBuilder("delete from ").append(getTable()).append(" where ")
-					.append(idField.getColumnName()).append("=?");
+			StringBuilder sql = makeDeleteByIdSql().append("=?");
 			if (versionField != null) {
 				sql.append(" and ").append(versionField.getColumnName()).append("=?");
 			}
@@ -275,44 +229,52 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 	}
 
 	@Override
-	public boolean existsById(ID id) throws RepositoryException {
+	public boolean existsById(I id) throws RepositoryException {
 		if (existsByIdSql == null) {
 			existsByIdSql = new StringBuilder("select 1 from ").append(getTable()).append(" where ")
-					.append(EntityManager.getIdColumnName(getEntityClass())).append("=?").toString();
+					.append(getEntityMeta().getIdColumnName()).append("=?").toString();
 		}
 		return find(existsByIdSql, new Object[] { id }, ObjectDBMapper.getInstance()) != null;
 	}
 
 	@Override
-	public T findById(ID id) throws RepositoryException {
+	public T findById(I id) throws RepositoryException {
+		Objects.requireNonNull(id);
 		if (findByIdSql == null) {
-			findByIdSql = new StringBuilder("select * from ").append(getTable()).append(" where ")
-					.append(EntityManager.getIdColumnName(getEntityClass())).append("=?").toString();
+			findByIdSql = makeFindByIdSql().append("=?").toString();
 		}
 		return find(findByIdSql, new Object[] { id }, getEntityMapper());
 	}
 
 	@Override
-	public List<T> findByIds(Collection<ID> ids) throws RepositoryException {
-		StringBuilder sql = new StringBuilder("select * from ").append(getTable()).append(" where ")
-				.append(EntityManager.getIdColumnName(getEntityClass()));
+	public T getById(I id) throws RepositoryException {
+		T entity = findById(id);
+		if (entity == null) {
+			throw new RepositoryException("No entity " + getEntityClass() + " found of " + id);
+		}
+		return entity;
+	}
+
+	@Override
+	public List<T> findByIds(Collection<I> ids) throws RepositoryException {
+		StringBuilder sql = makeFindByIdSql();
 		appendInClause(sql, ids);
 		return findForList(sql.toString(), ids.toArray(), 0, 0, getEntityMapper());
 	}
 
 	@SuppressWarnings("unchecked")
 	@Override
-	public List<T> findByIdsInOrder(Collection<ID> ids) throws RepositoryException {
+	public List<T> findByIdsInOrder(Collection<I> ids) throws RepositoryException {
 		List<T> list = findByIds(ids);
 		if (list.isEmpty()) {
 			return Collections.emptyList();
 		}
-		Map<ID, T> map = new HashMap<>();
+		Map<I, T> map = new HashMap<>();
 		for (T item : list) {
-			map.put((ID) EntityManager.getEntityId(item), item);
+			map.put((I) getEntityMeta().getEntityId(item), item);
 		}
 		List<T> listInOrder = new ArrayList<>(list.size());
-		for (ID id : ids) {
+		for (I id : ids) {
 			T item = map.get(id);
 			if (item != null) {
 				listInOrder.add(item);
@@ -322,7 +284,7 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 	}
 
 	@Override
-	public Map<ID, T> findByIdsAsMap(Collection<ID> ids) throws RepositoryException {
+	public Map<I, T> findByIdsAsMap(Collection<I> ids) throws RepositoryException {
 		List<T> list = findByIds(ids);
 		return list2map(list);
 	}
@@ -386,6 +348,106 @@ public abstract class DBCRUDRepository<T, ID> extends DBRepository implements CR
 
 	protected final Set<T> findForSet(String sql, Object[] params, int offset, int limit) {
 		return findForSet(sql, params, offset, limit, getEntityMapper());
+	}
+
+	private void doInsert(T entity) {
+		EntityMeta meta = getEntityMeta();
+		DefaultFieldConverter converter = getDefaultFieldConverter();
+		String sql = meta.getInsertSql(entity, converter);
+		SaveParams insertParams = meta.getInsertParams(Collections.singletonList(entity), converter);
+		Class<?> generatedIdClass = meta.findGeneratedIdFieldType();
+		if (generatedIdClass == null) {
+			execute(sql, insertParams.getParams().get(0));
+		} else {
+			Object generatedId = getJdbcTemplate().execute(new GeneratKeysPreparedStatementCreator(sql),
+					new InsertPreparedStatementCallback<>(insertParams.getParams().get(0), generatedIdClass));
+			if (generatedId == null) {
+				throw new RepositoryException("No id generated");
+			}
+			// 生成ID回传
+			meta.setEntityId(entity, generatedId, converter);
+		}
+		// 版本号回传
+		if (insertParams.versioning()) {
+			meta.setVersionValue(entity, insertParams.getNewVersions().get(0));
+		}
+	}
+
+	private boolean doUpdate(List<T> entityList, Set<String> fields, boolean upsert) {
+		Object entity = entityList.get(0);
+		EntityMeta meta = getEntityMeta();
+		DefaultFieldConverter converter = getDefaultFieldConverter();
+		String sql = meta.getUpdateSql(entity, fields, converter);
+		SaveParams params = meta.getUpdateParams(entityList, fields, converter);
+		int[] result;
+		if (params.getParams().size() > 1) {
+			result = executeBatch(sql, params.getParams());
+		} else {
+			result = new int[] { execute(sql, params.getParams().get(0)) };
+		}
+		boolean success = Arrays.stream(result).allMatch(i -> i > 0);
+		boolean versioning = params.versioning();
+		// 如果未能保存，如果版本控制，需要抛出相关异常，否则返回false
+		if (!success) {
+			if (versioning && !upsert) {
+				throw versioningError(entityList, result);
+			}
+			return false;
+		}
+		// 保存成功，如果版本控制，版本号需要更新到实体
+		if (versioning) {
+			for (int i = 0; i < entityList.size(); i++) {
+				meta.setVersionValue(entityList.get(i), params.getNewVersions().get(i));
+			}
+		}
+		return true;
+	}
+
+	private StaleEntityRepositoryException versioningError(List<T> entityList, int[] result) {
+		List<Object> badIds = new ArrayList<>(entityList.size());
+		for (int i = 0; i < result.length; i++) {
+			if (result[i] <= 0) {
+				badIds.add(getEntityMeta().getEntityId(entityList.get(i)));
+			}
+		}
+		return new StaleEntityRepositoryException(
+				"Failed to update entity, maybe entity is stale: " + StringUtil.join(badIds));
+	}
+
+	private StringBuilder makeDeleteByIdSql() {
+		StringBuilder buf = new StringBuilder("delete from ").append(getTable());
+		appendWhere(buf).append(getEntityMeta().getIdColumnName());
+		return buf;
+	}
+
+	private StringBuilder makeFindByIdSql() {
+		StringBuilder buf = new StringBuilder("select * from ").append(getTable());
+		appendWhere(buf).append(getEntityMeta().getIdColumnName());
+		return buf;
+	}
+
+	private EntityMeta getEntityMeta() {
+		if (entityMeta == null) {
+			entityMeta = EntityManager.getEntityMetaOf(getEntityClass());
+		}
+		return entityMeta;
+	}
+
+	private static StringBuilder appendWhere(StringBuilder buf) {
+		return buf.append(" where ");
+	}
+
+	private static StringBuilder appendInClause(StringBuilder sql, Collection<?> items) {
+		sql.append(" in(");
+		for (int i = 0; i < items.size(); i++) {
+			if (i > 0) {
+				sql.append(",?");
+			} else {
+				sql.append('?');
+			}
+		}
+		sql.append(')');
+		return sql;
 	}
 
 }

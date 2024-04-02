@@ -21,8 +21,7 @@ public class GeneratKeysPreparedStatementCreator implements PreparedStatementCre
 
 	@Override
 	public PreparedStatement createPreparedStatement(Connection con) throws SQLException {
-		PreparedStatement statement = con.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
-		return statement;
+		return con.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
 	}
 
 }

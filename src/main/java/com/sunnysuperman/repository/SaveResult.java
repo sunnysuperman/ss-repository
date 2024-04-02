@@ -1,9 +1,18 @@
 package com.sunnysuperman.repository;
 
 public class SaveResult {
+	public static final SaveResult RES_NONE = new SaveResult(false, false);
+	public static final SaveResult RES_INSERTED = new SaveResult(true, false);
+	public static final SaveResult RES_UPDATED = new SaveResult(false, true);
+
 	private boolean inserted;
 	private boolean updated;
-	private Object generatedId;
+
+	private SaveResult(boolean inserted, boolean updated) {
+		super();
+		this.inserted = inserted;
+		this.updated = updated;
+	}
 
 	public boolean success() {
 		return inserted || updated;
@@ -13,24 +22,8 @@ public class SaveResult {
 		return inserted;
 	}
 
-	public void setInserted(boolean inserted) {
-		this.inserted = inserted;
-	}
-
 	public boolean isUpdated() {
 		return updated;
-	}
-
-	public void setUpdated(boolean updated) {
-		this.updated = updated;
-	}
-
-	public Object getGeneratedId() {
-		return generatedId;
-	}
-
-	public void setGeneratedId(Object generatedId) {
-		this.generatedId = generatedId;
 	}
 
 }

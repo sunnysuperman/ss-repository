@@ -1,10 +1,12 @@
 package com.sunnysuperman.repository.db;
 
+import java.util.List;
+
 public class DBFunction {
 	private String function;
-	private Object[] params;
+	private List<Object> params;
 
-	public DBFunction(String function, Object[] params) {
+	public DBFunction(String function, List<Object> params) {
 		super();
 		this.function = function;
 		this.params = params;
@@ -14,7 +16,7 @@ public class DBFunction {
 		return function;
 	}
 
-	public Object[] getParams() {
+	public List<Object> getParams() {
 		return params;
 	}
 

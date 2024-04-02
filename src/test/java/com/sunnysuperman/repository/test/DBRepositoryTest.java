@@ -1,7 +1,9 @@
 package com.sunnysuperman.repository.test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -253,7 +255,7 @@ public class DBRepositoryTest {
 
 			Long newId = repo.insertDoc("test_insert_generate_key", Collections.singletonMap("val", makeValue()),
 					Long.class);
-			assertTrue(newId == currentId + 2);
+			assertEquals(currentId + 2, newId);
 		}
 
 		{
@@ -265,7 +267,7 @@ public class DBRepositoryTest {
 			repo.insertDoc("test_insert", doc);
 
 			int count2 = repo.count("select count(*) from test_insert", null);
-			assertTrue(count2 == count + 1);
+			assertEquals(count + 1, count2);
 		}
 	}
 
@@ -283,7 +285,7 @@ public class DBRepositoryTest {
 
 			long currentId2 = getCurrentAutoIncrementId();
 
-			assertTrue(currentId2 == currentId + 3);
+			assertEquals(currentId + 3, currentId2);
 			// 重置自增id
 			currentId = currentId2;
 		}
@@ -293,10 +295,9 @@ public class DBRepositoryTest {
 				docs.add(Collections.singletonMap("val", makeValue()));
 			}
 			List<Long> ids = repo.insertDocs("test_insert_generate_key", docs, Long.class);
-
-			assertTrue(ids.size() == docs.size());
+			assertEquals(docs.size(), ids.size());
 			for (int i = 0; i < ids.size(); i++) {
-				assertTrue(ids.get(i).longValue() == currentId + i + 1);
+				assertEquals(currentId + i + 1, ids.get(i).longValue());
 			}
 		}
 	}
@@ -311,9 +312,9 @@ public class DBRepositoryTest {
 		entity.setVal(makeValue());
 		repo.insert(entity);
 
-		assertTrue(entity.getId() == currentId + 1);
+		assertEquals(currentId + 1, entity.getId());
 		long currentId2 = getCurrentAutoIncrementId();
-		assertTrue(currentId2 == currentId + 1);
+		assertEquals(currentId + 1, currentId2);
 	}
 
 	@Test
@@ -336,10 +337,10 @@ public class DBRepositoryTest {
 		repo.insertBatch(entityList);
 
 		for (int i = 0; i < entityList.size(); i++) {
-			assertTrue(entityList.get(i).getId().longValue() == currentId + i + 1);
+			assertEquals(currentId + i + 1, entityList.get(i).getId().longValue());
 		}
 		long currentId2 = getCurrentAutoIncrementId();
-		assertTrue(currentId2 == currentId + entityList.size());
+		assertEquals(currentId + entityList.size(), currentId2);
 	}
 
 	@Test
@@ -360,10 +361,10 @@ public class DBRepositoryTest {
 		}
 		{
 			InsertUpdateAwareEntity e = repo.findById(id);
-			assertTrue(e.getV1().equals("xx1"));
-			assertTrue(e.getV2() == null);
-			assertTrue(e.getV3().equals("xx3"));
-			assertTrue(e.getV4() == null);
+			assertEquals("xx1", e.getV1());
+			assertNull(e.getV2());
+			assertEquals("xx3", e.getV3());
+			assertNull(e.getV4());
 		}
 		{
 			InsertUpdateAwareEntity e = repo.findById(id);
@@ -375,10 +376,10 @@ public class DBRepositoryTest {
 		}
 		{
 			InsertUpdateAwareEntity e = repo.findById(id);
-			assertTrue(e.getV1().equals("zz1"));
-			assertTrue(e.getV2().equals("zz2"));
-			assertTrue(e.getV3().equals("xx3"));
-			assertTrue(e.getV4() == null);
+			assertEquals("zz1", e.getV1());
+			assertEquals("zz2", e.getV2());
+			assertEquals("xx3", e.getV3());
+			assertNull(e.getV4());
 		}
 		{
 			InsertUpdateAwareEntity e = repo.findById(id);
@@ -388,10 +389,10 @@ public class DBRepositoryTest {
 		}
 		{
 			InsertUpdateAwareEntity e = repo.findById(id);
-			assertTrue(e.getV1().equals("zz1"));
-			assertTrue(e.getV2().equals("zz2"));
-			assertTrue(e.getV3().equals("zz3"));
-			assertTrue(e.getV4().equals("zz4"));
+			assertEquals("zz1", e.getV1());
+			assertEquals("zz2", e.getV2());
+			assertEquals("zz3", e.getV3());
+			assertEquals("zz4", e.getV4());
 		}
 	}
 
@@ -406,30 +407,30 @@ public class DBRepositoryTest {
 			entity.setVal(makeValue());
 			repo.insert(entity);
 			id = entity.getId();
-			assertTrue(entity.getVersion() == 1);
+			assertEquals(1, entity.getVersion());
 		}
 		IntVerionAwareEntity last;
 		{
 			IntVerionAwareEntity entity = repo.findById(id);
-			assertTrue(entity.getVersion() == 1);
+			assertEquals(1, entity.getVersion());
 
 			// 更新
 			entity.setVal(makeValue());
 			repo.update(entity);
-			assertTrue(entity.getId().equals(id));
-			assertTrue(entity.getVersion() == 2);
+			assertEquals(id, entity.getId());
+			assertEquals(2, entity.getVersion());
 
 			// 连续更新
 			entity.setVal(makeValue());
 			repo.update(entity);
-			assertTrue(entity.getId().equals(id));
-			assertTrue(entity.getVersion() == 3);
+			assertEquals(id, entity.getId());
+			assertEquals(3, entity.getVersion());
 			last = entity;
 		}
 		{
 			IntVerionAwareEntity entity = repo.findById(id);
-			assertTrue(entity.getVersion() == 3);
-			assertTrue(entity.getVal().equals(last.getVal()));
+			assertEquals(3, entity.getVersion());
+			assertEquals(last.getVal(), entity.getVal());
 		}
 		// 指定版本号插入
 		{
@@ -437,11 +438,11 @@ public class DBRepositoryTest {
 			entity.setVersion(2);
 			entity.setVal(makeValue());
 			repo.insert(entity);
-			assertTrue(entity.getVersion() == 2);
+			assertEquals(2, entity.getVersion());
 
 			IntVerionAwareEntity entity2 = repo.findById(entity.getId());
-			assertTrue(entity2.getVersion() == 2);
-			assertTrue(entity2.getVal().equals(entity.getVal()));
+			assertEquals(2, entity2.getVersion());
+			assertEquals(entity.getVal(), entity2.getVal());
 		}
 		// 仅更新版本号
 		{
@@ -450,17 +451,17 @@ public class DBRepositoryTest {
 			repo.insert(entity);
 
 			IntVerionAwareEntity entity2 = repo.findById(entity.getId());
-			assertTrue(entity2.getVersion() == 1);
+			assertEquals(1, entity2.getVersion());
 			repo.compareAndUpdateVersion(entity2);
-			assertTrue(entity2.getVersion() == 2);
+			assertEquals(2, entity2.getVersion());
 
 			IntVerionAwareEntity entity3 = repo.findById(entity.getId());
-			assertTrue(entity3.getVersion() == 2);
+			assertEquals(2, entity3.getVersion());
 			repo.update(entity3, Collections.singleton("version"));
-			assertTrue(entity3.getVersion() == 3);
+			assertEquals(3, entity3.getVersion());
 
 			IntVerionAwareEntity entity4 = repo.findById(entity.getId());
-			assertTrue(entity4.getVersion() == 3);
+			assertEquals(3, entity4.getVersion());
 		}
 	}
 
@@ -479,6 +480,7 @@ public class DBRepositoryTest {
 			repo.save(entity);
 			assertTrue(false);
 		} catch (RepositoryException e) {
+			e.printStackTrace();
 			assertTrue(true);
 		}
 		{
@@ -487,31 +489,31 @@ public class DBRepositoryTest {
 			entity.setVersion(10L);
 			entity.setVal(makeValue());
 			repo.save(entity);
-			assertTrue(entity.getId().equals(id));
-			assertTrue(entity.getVersion() == 10L);
+			assertEquals(id, entity.getId());
+			assertEquals(10L, entity.getVersion());
 		}
 		LongVerionAwareEntity last;
 		{
 			LongVerionAwareEntity entity = repo.findById(id);
-			assertTrue(entity.getVersion() == 10L);
+			assertEquals(10L, entity.getVersion());
 
 			// 更新
 			entity.setVal(makeValue());
 			repo.update(entity);
-			assertTrue(entity.getId().equals(id));
-			assertTrue(entity.getVersion() == 11L);
+			assertEquals(id, entity.getId());
+			assertEquals(11L, entity.getVersion());
 
 			// 连续更新
 			entity.setVal(makeValue());
 			repo.update(entity);
-			assertTrue(entity.getId().equals(id));
-			assertTrue(entity.getVersion() == 12L);
+			assertEquals(id, entity.getId());
+			assertEquals(12L, entity.getVersion());
 			last = entity;
 		}
 		{
 			LongVerionAwareEntity entity = repo.findById(id);
-			assertTrue(entity.getVersion() == 12L);
-			assertTrue(entity.getVal().equals(last.getVal()));
+			assertEquals(12L, entity.getVersion());
+			assertEquals(last.getVal(), entity.getVal());
 		}
 		// 指定版本号插入
 		{
@@ -523,11 +525,11 @@ public class DBRepositoryTest {
 			entity.setVersion(20L);
 			entity.setVal(makeValue());
 			repo.insert(entity);
-			assertTrue(entity.getVersion() == 20L);
+			assertEquals(20L, entity.getVersion());
 
 			LongVerionAwareEntity entity2 = repo.findById(entity.getId());
-			assertTrue(entity2.getVersion() == 20L);
-			assertTrue(entity2.getVal().equals(entity.getVal()));
+			assertEquals(20L, entity2.getVersion());
+			assertEquals(entity.getVal(), entity2.getVal());
 		}
 	}
 
@@ -633,6 +635,77 @@ public class DBRepositoryTest {
 		}
 
 		assertTrue(repo.delete(a2));
+	}
+
+	@Test
+	void updateBatch() throws Exception {
+		DBCRUDRepository<IntVerionAwareEntity, Long> repo = getCRUDRepository(IntVerionAwareEntity.class, Long.class);
+
+		IntVerionAwareEntity e1 = new IntVerionAwareEntity();
+		e1.setVal("xx");
+		repo.insert(e1);
+		e1.setVal("xx2");
+
+		IntVerionAwareEntity e2 = new IntVerionAwareEntity();
+		e2.setVal("yy");
+		repo.insert(e2);
+		e2.setVal("zz");
+
+		assertTrue(repo.updateBatch(Arrays.asList(e1, e2)));
+
+		{
+			IntVerionAwareEntity e = repo.getById(e1.getId());
+			assertEquals(2, e.getVersion());
+			assertEquals("xx2", e.getVal());
+		}
+		{
+			e2 = repo.getById(e2.getId());
+			assertEquals(2, e2.getVersion());
+			assertEquals("zz", e2.getVal());
+		}
+		{
+			IntVerionAwareEntity e = repo.getById(e1.getId());
+			e.setVersion(1); // 版本号不对
+			e.setVal("xx3");
+
+			e2.setVal("zz...");
+
+			try {
+				repo.updateBatch(Arrays.asList(e, e2));
+				assertTrue(false);
+			} catch (StaleEntityRepositoryException ex) {
+				ex.printStackTrace();
+				assertTrue(ex.getMessage().contains(e.getId().toString()));
+				assertFalse(ex.getMessage().contains(e2.getId().toString()));
+			}
+		}
+		// 批量提交部分失败
+		{
+			e1 = repo.getById(e1.getId());
+			assertEquals(2, e1.getVersion());
+			assertEquals("xx2", e1.getVal());
+		}
+		{
+			e2 = repo.getById(e2.getId());
+			assertEquals(3, e2.getVersion());
+			assertEquals("zz...", e2.getVal());
+		}
+
+		// 版本正确，再次提交批量修改
+		e1.setVal("xx5");
+		e2.setVal("zz6");
+		assertTrue(repo.updateBatch(Arrays.asList(e1, e2)));
+
+		{
+			e1 = repo.getById(e1.getId());
+			assertEquals(3, e1.getVersion());
+			assertEquals("xx5", e1.getVal());
+		}
+		{
+			e2 = repo.getById(e2.getId());
+			assertEquals(4, e2.getVersion());
+			assertEquals("zz6", e2.getVal());
+		}
 	}
 
 	private String makeValue() {

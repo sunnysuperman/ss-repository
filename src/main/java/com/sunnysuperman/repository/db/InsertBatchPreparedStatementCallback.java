@@ -4,6 +4,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import org.springframework.dao.DataAccessException;
@@ -32,7 +33,7 @@ public class InsertBatchPreparedStatementCallback<T> implements PreparedStatemen
 
 		ResultSet rs = ps.getGeneratedKeys();
 		if (rs == null) {
-			return null;
+			return Collections.emptyList();
 		}
 		try {
 			List<T> results = new ArrayList<>(paramsBatch.size());

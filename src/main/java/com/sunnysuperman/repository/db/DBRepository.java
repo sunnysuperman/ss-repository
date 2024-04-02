@@ -41,13 +41,11 @@ public abstract class DBRepository {
 			}
 			buf.append(convertColumnName(entry.getKey()));
 			Object fieldValue = entry.getValue();
-			if (fieldValue != null && fieldValue instanceof DBFunction) {
+			if (fieldValue instanceof DBFunction) {
 				DBFunction cf = (DBFunction) fieldValue;
 				buf2.append(cf.getFunction());
 				if (cf.getParams() != null) {
-					for (Object param : cf.getParams()) {
-						params.add(param);
-					}
+					params.addAll(cf.getParams());
 				}
 			} else {
 				buf2.append('?');
@@ -67,7 +65,7 @@ public abstract class DBRepository {
 		StringBuilder sql = new StringBuilder("update ");
 		sql.append(tableName);
 		sql.append(" set ");
-		List<Object> params = new LinkedList<Object>();
+		List<Object> params = new LinkedList<>();
 		int offset = 0;
 		for (Entry<String, ?> entry : doc.entrySet()) {
 			String fieldKey = entry.getKey();
@@ -94,14 +92,12 @@ public abstract class DBRepository {
 			}
 			offset++;
 			sql.append(fieldKey);
-			if (fieldValue != null && fieldValue instanceof DBFunction) {
+			if (fieldValue instanceof DBFunction) {
 				// column=ST_GeometryFromText(?,4326), column=point(?,?), etc.
 				DBFunction func = (DBFunction) fieldValue;
 				sql.append("=").append(func.getFunction());
 				if (func.getParams() != null) {
-					for (Object param : func.getParams()) {
-						params.add(param);
-					}
+					params.addAll(func.getParams());
 				}
 			} else {
 				sql.append("=?");
@@ -132,7 +128,7 @@ public abstract class DBRepository {
 	protected String getCountDialect(String sql) {
 		int index1 = sql.indexOf(" from ");
 		if (index1 <= 0) {
-			throw new RuntimeException("Bad sql: " + sql);
+			throw new RepositoryException("Bad sql: " + sql);
 		}
 		int index2 = sql.indexOf(" order by", index1);
 		if (index2 < 0) {
@@ -152,6 +148,11 @@ public abstract class DBRepository {
 
 	public int execute(String sql, Object[] params, int limit) {
 		return execute(getExecuteLimitDialect(sql, limit), params);
+	}
+
+	@Deprecated
+	public int[] batchExecute(String sql, List<Object[]> batchParams) {
+		return getJdbcTemplate().batchUpdate(sql, batchParams);
 	}
 
 	public int[] executeBatch(String sql, List<Object[]> batchParams) {
@@ -189,37 +190,14 @@ public abstract class DBRepository {
 		if (docs.size() == 1) {
 			T generatedKey = insertDoc(tableName, docs.get(0), generatedKeyClass);
 			if (generatedKey == null) {
-				return null;
+				return Collections.emptyList();
 			}
 			return Collections.singletonList(generatedKey);
 		}
 		Map<String, Object> testDoc = docs.get(0);
 		String[] columns = new String[testDoc.size()];
 		List<Object[]> paramsBatch = new ArrayList<>(docs.size());
-		String sql;
-		{
-			int i = 0;
-			StringBuilder buf = new StringBuilder("insert into ");
-			StringBuilder buf2 = new StringBuilder();
-			buf.append(tableName);
-			buf.append('(');
-			for (Entry<String, Object> entry : testDoc.entrySet()) {
-				String key = entry.getKey();
-				columns[i] = key;
-				if (i > 0) {
-					buf.append(',');
-					buf2.append(',');
-				}
-				buf.append(convertColumnName(key));
-				buf2.append('?');
-				i++;
-			}
-
-			buf.append(") values(");
-			buf.append(buf2);
-			buf.append(')');
-			sql = buf.toString();
-		}
+		String sql = makeInsertSql(tableName, testDoc, columns);
 		for (Map<String, Object> doc : docs) {
 			Object[] params = new Object[columns.length];
 			for (int i = 0; i < columns.length; i++) {
@@ -230,13 +208,13 @@ public abstract class DBRepository {
 		// 无需生成自增ID
 		if (generatedKeyClass == null) {
 			getJdbcTemplate().batchUpdate(sql, paramsBatch);
-			return null;
+			return Collections.emptyList();
 		}
 		// insert并生成自增ID
 		List<T> generatedKeys = getJdbcTemplate().execute(new GeneratKeysPreparedStatementCreator(sql),
 				new InsertBatchPreparedStatementCallback<>(paramsBatch, generatedKeyClass));
-		if (generatedKeys == null) {
-			throw new RepositoryException("Insert error");
+		if (generatedKeys == null || generatedKeys.isEmpty()) {
+			throw new RepositoryException("Insert error: no id generated");
 		}
 		return generatedKeys;
 	}
@@ -315,7 +293,7 @@ public abstract class DBRepository {
 		if (offset != 0 || size == limit) {
 			size = count(getCountDialect(sql), params);
 		}
-		return new Page<T>(items, size, offset, limit);
+		return new Page<>(items, size, offset, limit);
 	}
 
 	public <T> Page<T> findForPage(String sql, String countSql, Object[] params, int offset, int limit,
@@ -328,7 +306,7 @@ public abstract class DBRepository {
 		if (offset != 0 || size == limit) {
 			size = count(countSql != null ? countSql : getCountDialect(sql), params);
 		}
-		return new Page<T>(items, size, offset, limit);
+		return new Page<>(items, size, offset, limit);
 	}
 
 	public <T> PullPage<T> findForPullPage(String sql, Object[] params, String marker, int limit, DBMapper<T> mapper) {
@@ -381,5 +359,29 @@ public abstract class DBRepository {
 
 	public boolean exists(String sql, Object[] params) {
 		return find(sql, params, ObjectDBMapper.getInstance()) != null;
+	}
+
+	private String makeInsertSql(String tableName, Map<String, Object> testDoc, String[] columns) {
+		int i = 0;
+		StringBuilder buf = new StringBuilder("insert into ");
+		StringBuilder buf2 = new StringBuilder();
+		buf.append(tableName);
+		buf.append('(');
+		for (Entry<String, Object> entry : testDoc.entrySet()) {
+			String key = entry.getKey();
+			columns[i] = key;
+			if (i > 0) {
+				buf.append(',');
+				buf2.append(',');
+			}
+			buf.append(convertColumnName(key));
+			buf2.append('?');
+			i++;
+		}
+
+		buf.append(") values(");
+		buf.append(buf2);
+		buf.append(')');
+		return buf.toString();
 	}
 }

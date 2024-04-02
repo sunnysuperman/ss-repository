@@ -15,6 +15,7 @@ import org.springframework.jdbc.core.PreparedStatementCreator;
 
 public class LogAwareJdbcTemplate extends JdbcTemplate {
 	private static final Logger LOG = LoggerFactory.getLogger(LogAwareJdbcTemplate.class);
+	private static final String LOG_MSG = "[Jdbc] {}, take {} ms";
 	private static final boolean INFO_ENABLED = LOG.isInfoEnabled();
 
 	public LogAwareJdbcTemplate(DataSource dataSource, boolean lazyInit) {
@@ -37,7 +38,7 @@ public class LogAwareJdbcTemplate extends JdbcTemplate {
 		} finally {
 			if (INFO_ENABLED) {
 				long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
-				LOG.info("[Jdbc] {}, take {} ms", sql, take);
+				LOG.info(LOG_MSG, sql, take);
 			}
 		}
 	}
@@ -50,7 +51,7 @@ public class LogAwareJdbcTemplate extends JdbcTemplate {
 		} finally {
 			if (INFO_ENABLED) {
 				long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
-				LOG.info("[Jdbc] {}, take {} ms", sql, take);
+				LOG.info(LOG_MSG, sql, take);
 			}
 		}
 	}
@@ -63,7 +64,7 @@ public class LogAwareJdbcTemplate extends JdbcTemplate {
 		} finally {
 			if (INFO_ENABLED) {
 				long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
-				LOG.info("[Jdbc] {}, take {} ms", sql, take);
+				LOG.info(LOG_MSG, sql, take);
 			}
 		}
 	}
@@ -76,7 +77,7 @@ public class LogAwareJdbcTemplate extends JdbcTemplate {
 		} finally {
 			if (INFO_ENABLED) {
 				long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
-				LOG.info("[Jdbc] {}, take {} ms", sql, take);
+				LOG.info(LOG_MSG, sql, take);
 			}
 		}
 	}
@@ -90,7 +91,7 @@ public class LogAwareJdbcTemplate extends JdbcTemplate {
 			if (INFO_ENABLED) {
 				long take = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t1);
 				if (psc instanceof GeneratKeysPreparedStatementCreator) {
-					LOG.info("[Jdbc] {}, take {} ms", ((GeneratKeysPreparedStatementCreator) psc).getSql(), take);
+					LOG.info(LOG_MSG, ((GeneratKeysPreparedStatementCreator) psc).getSql(), take);
 				}
 			}
 		}
@@ -99,4 +100,5 @@ public class LogAwareJdbcTemplate extends JdbcTemplate {
 	private long getT1() {
 		return INFO_ENABLED ? System.nanoTime() : 0;
 	}
+
 }

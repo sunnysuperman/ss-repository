@@ -9,6 +9,9 @@ import com.sunnysuperman.repository.RepositoryException;
 
 final class BeanUtils {
 
+	private BeanUtils() {
+	}
+
 	public static Field getFieldByReadMethod(Method method) throws RepositoryException {
 		if (Modifier.isStatic(method.getModifiers())) {
 			return null;

@@ -74,10 +74,7 @@ public class BuildInDefautFieldConverter implements DefaultFieldConverter {
 			return true;
 		}
 		// 二进制
-		if (type.isArray() && type.getComponentType().equals(byte.class)) {
-			return true;
-		}
-		return false;
+		return type.isArray() && type.getComponentType().equals(byte.class);
 	}
 
 }

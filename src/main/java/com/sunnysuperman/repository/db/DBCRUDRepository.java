@@ -61,7 +61,7 @@ public abstract class DBCRUDRepository<T, I> extends DBRepository implements CRU
 	}
 
 	protected final String getTable() {
-		return getEntityMeta().tableName;
+		return getEntityMeta().getTableName();
 	}
 
 	protected final String getColumnsByFields(String fields) {
@@ -105,7 +105,7 @@ public abstract class DBCRUDRepository<T, I> extends DBRepository implements CRU
 			insert(entity);
 			return SaveResult.RES_INSERTED;
 		}
-		boolean upsert = meta.idInfo.strategy() == IdStrategy.PROVIDED;
+		boolean upsert = meta.getIdInfo().strategy() == IdStrategy.PROVIDED;
 		if (upsert) {
 			if (doUpdate(Collections.singletonList(entity), null, true)) {
 				return SaveResult.RES_UPDATED;
@@ -285,6 +285,11 @@ public abstract class DBCRUDRepository<T, I> extends DBRepository implements CRU
 
 	@Override
 	public Map<I, T> findByIdsAsMap(Collection<I> ids) throws RepositoryException {
+		return findForMapByIds(ids);
+	}
+
+	@Override
+	public Map<I, T> findForMapByIds(Collection<I> ids) throws RepositoryException {
 		List<T> list = findByIds(ids);
 		return list2map(list);
 	}

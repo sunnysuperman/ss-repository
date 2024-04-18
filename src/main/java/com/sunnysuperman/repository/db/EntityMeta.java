@@ -25,15 +25,39 @@ import com.sunnysuperman.repository.annotation.IdStrategy;
 import com.sunnysuperman.repository.annotation.Table;
 
 class EntityMeta {
-	protected List<EntityField> normalFields;
-	protected EntityField idField;
-	protected EntityField versionField;
-	protected Id idInfo;
-	protected String tableName;
-	protected String insertSql;
-	protected String updateSql;
-	protected String emptyUpdateSql;
-	protected Map<String, String> updateSqls = new ConcurrentHashMap<>();
+	private List<EntityField> normalFields;
+	private EntityField idField;
+	private EntityField versionField;
+	private Id idInfo;
+	private String tableName;
+	private String insertSql;
+	private String updateSql;
+	private String emptyUpdateSql;
+	private Map<String, String> updateSqls = new ConcurrentHashMap<>();
+
+	public EntityField getVersionField() {
+		return versionField;
+	}
+
+	public void setVersionField(EntityField versionField) {
+		this.versionField = versionField;
+	}
+
+	public List<EntityField> getNormalFields() {
+		return normalFields;
+	}
+
+	public EntityField getIdField() {
+		return idField;
+	}
+
+	public Id getIdInfo() {
+		return idInfo;
+	}
+
+	public String getTableName() {
+		return tableName;
+	}
 
 	public static EntityMeta of(Class<?> clazz) {
 		Entity entity = clazz.getAnnotation(Entity.class);

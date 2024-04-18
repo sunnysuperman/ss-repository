@@ -227,9 +227,9 @@ class EntityField {
 			throw new RepositoryException(field.getType() + " is not registered");
 		}
 		if (relationFieldName == null) {
-			relationField = meta.idField;
+			relationField = meta.getIdField();
 		} else {
-			for (EntityField f : meta.normalFields) {
+			for (EntityField f : meta.getNormalFields()) {
 				if (relationFieldName.equals(f.fieldName)) {
 					relationField = f;
 					break;

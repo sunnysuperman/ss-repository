@@ -708,6 +708,100 @@ public class DBRepositoryTest {
 		}
 	}
 
+	@Entity
+	@Table(name = "test_update_batch")
+	public static class UpdateBatchObj {
+		@Id(strategy = IdStrategy.INCREMENT)
+		@Column
+		private Long id;
+
+		@VersionControl
+		@Column
+		private Long version;
+
+		@Column
+		private String val;
+
+		@Column
+		private String val2;
+
+		public Long getId() {
+			return id;
+		}
+
+		public void setId(Long id) {
+			this.id = id;
+		}
+
+		public Long getVersion() {
+			return version;
+		}
+
+		public void setVersion(Long version) {
+			this.version = version;
+		}
+
+		public String getVal() {
+			return val;
+		}
+
+		public void setVal(String val) {
+			this.val = val;
+		}
+
+		public String getVal2() {
+			return val2;
+		}
+
+		public void setVal2(String val2) {
+			this.val2 = val2;
+		}
+
+	}
+
+	@Test
+	void updateBatch2() throws Exception {
+		DBCRUDRepository<UpdateBatchObj, Long> repo = getCRUDRepository(UpdateBatchObj.class, Long.class);
+
+		UpdateBatchObj e1 = new UpdateBatchObj();
+		e1.setVal("xx");
+		repo.insert(e1);
+
+		UpdateBatchObj e2 = new UpdateBatchObj();
+		e2.setVal(null);
+		e2.setVal2("yy");
+		repo.insert(e2);
+
+		{
+			UpdateBatchObj e = repo.getById(e1.getId());
+			assertEquals("xx", e.getVal());
+			assertNull(e.getVal2());
+		}
+		{
+			UpdateBatchObj e = repo.getById(e2.getId());
+			assertEquals("yy", e.getVal2());
+			assertNull(e.getVal());
+		}
+
+		e1.setVal("xx2");
+		e1.setVal2("xxl2");
+
+		e2.setVal("v");
+		e2.setVal2("yy2");
+		assertTrue(repo.updateBatch(Arrays.asList(e1, e2), new HashSet<>(Arrays.asList("val2"))));
+
+		{
+			UpdateBatchObj e = repo.getById(e1.getId());
+			assertEquals("xx", e.getVal());
+			assertEquals("xxl2", e.getVal2());
+		}
+		{
+			UpdateBatchObj e = repo.getById(e2.getId());
+			assertNull(e.getVal());
+			assertEquals("yy2", e.getVal2());
+		}
+	}
+
 	private String makeValue() {
 		return StringUtil.randomString("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", 20);
 	}

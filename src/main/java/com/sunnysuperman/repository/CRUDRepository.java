@@ -39,7 +39,10 @@ public interface CRUDRepository<T, I> {
 
 	List<T> findByIdsInOrder(Collection<I> ids) throws RepositoryException;
 
+	@Deprecated
 	Map<I, T> findByIdsAsMap(Collection<I> ids) throws RepositoryException;
+
+	Map<I, T> findForMapByIds(Collection<I> ids) throws RepositoryException;
 
 	List<T> findAll() throws RepositoryException;
 }

@@ -12,7 +12,9 @@ import java.util.Set;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.sunnysuperman.commons.page.Page;
+import com.sunnysuperman.commons.page.PageRequest;
 import com.sunnysuperman.commons.page.PullPage;
+import com.sunnysuperman.commons.page.PullPageRequest;
 import com.sunnysuperman.commons.util.FormatUtil;
 import com.sunnysuperman.repository.InsertUpdate;
 import com.sunnysuperman.repository.RepositoryException;
@@ -118,9 +120,16 @@ public abstract class DBRepository {
 		return new SqlAndParams(sql.toString(), paramsAsArray);
 	}
 
+	protected int maxNumberOfRows() {
+		return 10000;
+	}
+
 	protected String getPagingDialect(String sql, int offset, int limit) {
 		if (limit <= 0) {
-			return sql;
+			limit = maxNumberOfRows();
+			if (limit <= 0) {
+				return sql;
+			}
 		}
 		return new StringBuilder(sql).append(" limit ").append(offset).append(",").append(limit).toString();
 	}
@@ -296,6 +305,10 @@ public abstract class DBRepository {
 		return new Page<>(items, size, offset, limit);
 	}
 
+	public <T> Page<T> findForPage(String sql, Object[] params, PageRequest page, DBMapper<T> mapper) {
+		return findForPage(sql, params, page.getOffset(), page.getLimit(), mapper);
+	}
+
 	public <T> Page<T> findForPage(String sql, String countSql, Object[] params, int offset, int limit,
 			DBMapper<T> mapper) {
 		List<T> items = findForList(sql, params, offset, limit, mapper);
@@ -327,6 +340,10 @@ public abstract class DBRepository {
 		}
 		int newOffset = offset + limit;
 		return PullPage.of(items, String.valueOf(newOffset), hasMore);
+	}
+
+	public <T> PullPage<T> findForPullPage(String sql, Object[] params, PullPageRequest page, DBMapper<T> mapper) {
+		return findForPullPage(sql, params, page.getMarker(), page.getLimit(), mapper);
 	}
 
 	public <T> PullPage<T> findForPullPageByColumn(String sql, Object[] params, String column, int limit,

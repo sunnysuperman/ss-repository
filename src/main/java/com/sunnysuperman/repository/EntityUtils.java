@@ -7,8 +7,8 @@ public class EntityUtils extends EntityManager {
 	private EntityUtils() {
 	}
 
-	public static <T> void update(T latest, T original) {
-		EntityManager.update(latest, original);
+	public static <T> void copyNotUpdatableFields(T src, T dest) {
+		EntityManager.copyNotUpdatableFields(src, dest);
 	}
 
 }

@@ -56,7 +56,9 @@ class EntityField {
 		if (oneToOne != null || manyToOne != null) {
 			Class<?> relationType = field.getType();
 			if (relationType.getAnnotation(Entity.class) == null) {
-				throw new RepositoryException(relationType + " is not annotated with Entity");
+				throw new RepositoryException(
+						"Field '" + field + "' is annotated with @OneToOne or @ManyToOne, but field type '"
+								+ relationType + "' is not annotated with @Entity");
 			}
 			f.relation = true;
 			f.relationFieldName = StringUtil
@@ -223,9 +225,6 @@ class EntityField {
 			return relationField;
 		}
 		EntityMeta meta = EntityManager.getEntityMetaOf(field.getType());
-		if (meta == null) {
-			throw new RepositoryException(field.getType() + " is not registered");
-		}
 		if (relationFieldName == null) {
 			relationField = meta.getIdField();
 		} else {

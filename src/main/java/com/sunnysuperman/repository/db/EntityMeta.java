@@ -62,11 +62,11 @@ class EntityMeta {
 	public static EntityMeta of(Class<?> clazz) {
 		Entity entity = clazz.getAnnotation(Entity.class);
 		if (entity == null) {
-			throw new RepositoryException(clazz + " is not annotated with Entity");
+			throw new RepositoryException(clazz + " is not annotated with @Entity");
 		}
 		Table table = clazz.getAnnotation(Table.class);
 		if (table == null) {
-			throw new RepositoryException(clazz + " is not annotated with Table");
+			throw new RepositoryException(clazz + " is not annotated with @Table");
 		}
 		Set<String> columnNames = new HashSet<>();
 

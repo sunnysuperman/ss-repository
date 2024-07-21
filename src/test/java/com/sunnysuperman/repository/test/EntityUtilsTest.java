@@ -114,7 +114,7 @@ class EntityUtilsTest {
 	}
 
 	@Test
-	void testUpdate() {
+	void testCopyNotUpdatableFields() {
 		Rule rule1 = new Rule();
 		rule1.setId(1000L);
 		rule1.setVersion(2L);
@@ -133,7 +133,7 @@ class EntityUtilsTest {
 		rule2.setUpdatedBy("李四");
 		rule2.setUpdatedDate(FormatUtil.parseISO8601Date("2024-04-16T18:05:00.000Z", null));
 
-		EntityUtils.update(rule2, rule1);
+		EntityUtils.copyNotUpdatableFields(rule1, rule2);
 		assertEquals(2L, rule2.getVersion());
 		assertSame(rule1.getCreatedDate(), rule2.getCreatedDate());
 		assertEquals(FormatUtil.parseISO8601Date("2024-04-16T18:05:00.000Z", null), rule2.getUpdatedDate());

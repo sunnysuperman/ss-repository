@@ -299,16 +299,7 @@ public abstract class DBCRUDRepository<T, I> extends DBRepository implements CRU
 		if (findAllSql == null) {
 			findAllSql = new StringBuilder("select * from ").append(getTable()).toString();
 		}
-		int max = maxItemsForFindAll();
-		List<T> items = findForList(findAllSql, null, 0, max + 1, getEntityMapper());
-		if (max > 0 && items.size() > max) {
-			throw new RepositoryException("To prevent from OOM, we could not load more than " + max + " items");
-		}
-		return items;
-	}
-
-	protected int maxItemsForFindAll() {
-		return 10000;
+		return findForList(findAllSql, null, 0, 0, getEntityMapper());
 	}
 
 	protected final int updateDoc(String tableName, Map<String, Object> doc, String key, Object value,
@@ -327,7 +318,7 @@ public abstract class DBCRUDRepository<T, I> extends DBRepository implements CRU
 	}
 
 	protected final Page<T> findForPage(String sql, Object[] params, PageRequest page) {
-		return findForPage(sql, params, page.getOffset(), page.getLimit(), getEntityMapper());
+		return findForPage(sql, params, page, getEntityMapper());
 	}
 
 	protected final Page<T> findForPage(String sql, String countSql, Object[] params, PageRequest page) {
@@ -335,7 +326,7 @@ public abstract class DBCRUDRepository<T, I> extends DBRepository implements CRU
 	}
 
 	protected final PullPage<T> findForPullPage(String sql, Object[] params, PullPageRequest page) {
-		return findForPullPage(sql, params, page.getMarker(), page.getLimit(), getEntityMapper());
+		return findForPullPage(sql, params, page, getEntityMapper());
 	}
 
 	protected final PullPage<T> findForPullPageByColumn(String sql, Object[] params, String column,

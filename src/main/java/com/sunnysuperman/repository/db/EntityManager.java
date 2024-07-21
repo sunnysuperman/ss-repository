@@ -59,16 +59,16 @@ public class EntityManager {
 		}
 	}
 
-	protected static <T> void update(T latest, T original) {
-		Objects.requireNonNull(latest, "latest");
-		Objects.requireNonNull(original, "original");
-		Class<?> type = original.getClass();
+	protected static <T> void copyNotUpdatableFields(T src, T dest) {
+		Objects.requireNonNull(src, "src");
+		Objects.requireNonNull(dest, "dest");
+		Class<?> type = src.getClass();
 		EntityMeta meta = getEntityMetaOf(type);
 		meta.getNormalFields().forEach(field -> {
 			// 把不可更新的属性或版本控制属性 拷贝到 新对象里
 			if (!field.column.updatable() || field == meta.getVersionField()) {
-				Object value = field.getFieldValue(original);
-				field.setFieldValue(latest, value);
+				Object value = field.getFieldValue(src);
+				field.setFieldValue(dest, value);
 			}
 		});
 	}

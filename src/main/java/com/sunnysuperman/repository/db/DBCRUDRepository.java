@@ -13,6 +13,7 @@ import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 import com.sunnysuperman.commons.page.Page;
 import com.sunnysuperman.commons.page.PageRequest;
@@ -20,7 +21,6 @@ import com.sunnysuperman.commons.page.PullPage;
 import com.sunnysuperman.commons.page.PullPageRequest;
 import com.sunnysuperman.commons.util.StringUtil;
 import com.sunnysuperman.repository.CRUDRepository;
-import com.sunnysuperman.repository.FieldValue;
 import com.sunnysuperman.repository.RepositoryException;
 import com.sunnysuperman.repository.SaveResult;
 import com.sunnysuperman.repository.annotation.IdStrategy;
@@ -33,11 +33,6 @@ public abstract class DBCRUDRepository<T, I> extends DBRepository implements CRU
 	private Class<T> entityClass;
 	private DBMapper<T> entityMapper;
 	private EntityMeta entityMeta;
-	private String findByIdSql;
-	private String findAllSql;
-	private String deleteByIdSql;
-	private String deleteByIdAndVersionSql;
-	private String existsByIdSql;
 	private Map<String, String> fieldColumnMapping = new ConcurrentHashMap<>();
 
 	@SuppressWarnings("unchecked")
@@ -185,65 +180,61 @@ public abstract class DBCRUDRepository<T, I> extends DBRepository implements CRU
 
 	@Override
 	public boolean deleteById(I id) throws RepositoryException {
-		if (deleteByIdSql == null) {
-			deleteByIdSql = makeDeleteByIdSql().append("=?").toString();
-		}
-		return execute(deleteByIdSql, new Object[] { id }) > 0;
+		return doDeleteById(id);
 	}
 
 	@Override
 	public int deleteByIds(Collection<I> ids) throws RepositoryException {
 		if (ids.size() == 1) {
-			return deleteById(ids.iterator().next()) ? 1 : 0;
+			return doDeleteById(ids.iterator().next()) ? 1 : 0;
 		}
-		StringBuilder sql = makeDeleteByIdSql();
-		appendInClause(sql, ids);
-		return execute(sql.toString(), ids.toArray());
+		EntityMeta meta = getEntityMeta();
+		SqlAndParams sqlAndParams = meta.getDeleteByIdSqlAndParams(ids);
+		return execute(sqlAndParams.getSql(), sqlAndParams.getParams());
 	}
 
 	@Override
 	public boolean delete(T entity) throws RepositoryException {
+		return doDelete(entity);
+	}
+
+	@Override
+	public boolean deleteBatch(List<T> entityList) throws RepositoryException {
+		if (entityList.size() == 1) {
+			return doDelete(entityList.get(0));
+		}
 		EntityMeta meta = getEntityMeta();
-		FieldValue idField = meta.findIdFieldAndValue(entity, getDefaultFieldConverter());
-		FieldValue versionField = meta.findVersionFieldAndValue(entity, getDefaultFieldConverter());
-		// SQL缓存
-		if (deleteByIdAndVersionSql == null) {
-			StringBuilder sql = makeDeleteByIdSql().append("=?");
-			if (versionField != null) {
-				sql.append(" and ").append(versionField.getColumnName()).append("=?");
+		SqlAndBatchParams sqlAndParams = meta.getDeleteByEntityListSqlAndParams(entityList);
+		int[] result = executeBatch(sqlAndParams.getSql(), sqlAndParams.getParams());
+		List<Object> badIds = null;
+		for (int i = 0; i < result.length; i++) {
+			int deletedRow = result[i];
+			if (deletedRow != 1) {
+				if (badIds == null) {
+					badIds = new ArrayList<>(Math.min(result.length, 3));
+				}
+				badIds.add(meta.getEntityId(entityList.get(i)));
 			}
-			deleteByIdAndVersionSql = sql.toString();
 		}
-		Object[] params;
-		if (versionField != null) {
-			params = new Object[] { idField.getColumnValue(), versionField.getColumnValue() };
-		} else {
-			params = new Object[] { idField.getColumnValue() };
+		boolean success = badIds == null;
+		if (!success && meta.getVersionField() != null) {
+			throw new StaleEntityRepositoryException("Failed to delete entity for " + entityList.get(0).getClass() + "/"
+					+ badIds.stream().map(Object::toString).collect(Collectors.joining(","))
+					+ ", maybe entity is stale");
 		}
-		boolean updated = execute(deleteByIdAndVersionSql, params) > 0;
-		if (!updated && versionField != null) {
-			throw new StaleEntityRepositoryException("Failed to delete entity for " + entity.getClass() + "/"
-					+ idField.getColumnValue() + ", maybe entity is stale");
-		}
-		return updated;
+		return success;
 	}
 
 	@Override
 	public boolean existsById(I id) throws RepositoryException {
-		if (existsByIdSql == null) {
-			existsByIdSql = new StringBuilder("select 1 from ").append(getTable()).append(" where ")
-					.append(getEntityMeta().getIdColumnName()).append("=?").toString();
-		}
-		return find(existsByIdSql, new Object[] { id }, ObjectDBMapper.getInstance()) != null;
+		Objects.requireNonNull(id);
+		return find(getEntityMeta().getExistsByIdSql(), new Object[] { id }, ObjectDBMapper.getInstance()) != null;
 	}
 
 	@Override
 	public T findById(I id) throws RepositoryException {
 		Objects.requireNonNull(id);
-		if (findByIdSql == null) {
-			findByIdSql = makeFindByIdSql().append("=?").toString();
-		}
-		return find(findByIdSql, new Object[] { id }, getEntityMapper());
+		return find(getEntityMeta().getFindByIdSql(), new Object[] { id }, getEntityMapper());
 	}
 
 	@Override
@@ -257,9 +248,14 @@ public abstract class DBCRUDRepository<T, I> extends DBRepository implements CRU
 
 	@Override
 	public List<T> findByIds(Collection<I> ids) throws RepositoryException {
-		StringBuilder sql = makeFindByIdSql();
-		appendInClause(sql, ids);
-		return findForList(sql.toString(), ids.toArray(), 0, 0, getEntityMapper());
+		if (ids.size() == 1) {
+			T entity = findById(ids.iterator().next());
+			if (entity == null) {
+				return Collections.emptyList();
+			}
+			return Collections.singletonList(entity);
+		}
+		return findForList(getEntityMeta().getFindByIdsSql(ids), ids.toArray(), 0, 0, getEntityMapper());
 	}
 
 	@SuppressWarnings("unchecked")
@@ -296,10 +292,7 @@ public abstract class DBCRUDRepository<T, I> extends DBRepository implements CRU
 
 	@Override
 	public List<T> findAll() {
-		if (findAllSql == null) {
-			findAllSql = new StringBuilder("select * from ").append(getTable()).toString();
-		}
-		return findForList(findAllSql, null, 0, 0, getEntityMapper());
+		return findForList(getEntityMeta().getFindAllSql(), null, 0, 0, getEntityMapper());
 	}
 
 	protected final int updateDoc(String tableName, Map<String, Object> doc, String key, Object value,
@@ -410,18 +403,6 @@ public abstract class DBCRUDRepository<T, I> extends DBRepository implements CRU
 				"Failed to update entity, maybe entity is stale: " + StringUtil.join(badIds));
 	}
 
-	private StringBuilder makeDeleteByIdSql() {
-		StringBuilder buf = new StringBuilder("delete from ").append(getTable());
-		appendWhere(buf).append(getEntityMeta().getIdColumnName());
-		return buf;
-	}
-
-	private StringBuilder makeFindByIdSql() {
-		StringBuilder buf = new StringBuilder("select * from ").append(getTable());
-		appendWhere(buf).append(getEntityMeta().getIdColumnName());
-		return buf;
-	}
-
 	private EntityMeta getEntityMeta() {
 		if (entityMeta == null) {
 			entityMeta = EntityManager.getEntityMetaOf(getEntityClass());
@@ -429,21 +410,21 @@ public abstract class DBCRUDRepository<T, I> extends DBRepository implements CRU
 		return entityMeta;
 	}
 
-	private static StringBuilder appendWhere(StringBuilder buf) {
-		return buf.append(" where ");
+	private boolean doDeleteById(I id) throws RepositoryException {
+		EntityMeta meta = getEntityMeta();
+		String sql = meta.getDeleteByIdSql();
+		return execute(sql, new Object[] { id }) > 0;
 	}
 
-	private static StringBuilder appendInClause(StringBuilder sql, Collection<?> items) {
-		sql.append(" in(");
-		for (int i = 0; i < items.size(); i++) {
-			if (i > 0) {
-				sql.append(",?");
-			} else {
-				sql.append('?');
-			}
+	private boolean doDelete(T entity) throws RepositoryException {
+		EntityMeta meta = getEntityMeta();
+		SqlAndParams sqlAndParams = meta.getDeleteByEntitySqlAndParams(entity);
+		boolean updated = execute(sqlAndParams.getSql(), sqlAndParams.getParams()) > 0;
+		if (!updated && meta.getVersionField() != null) {
+			throw new StaleEntityRepositoryException("Failed to delete entity for " + entity.getClass() + "/"
+					+ meta.getEntityId(entity) + ", maybe entity is stale");
 		}
-		sql.append(')');
-		return sql;
+		return updated;
 	}
 
 }

@@ -29,6 +29,8 @@ public interface CRUDRepository<T, I> {
 
 	boolean delete(T entity) throws RepositoryException;
 
+	boolean deleteBatch(List<T> entityList) throws RepositoryException;
+
 	boolean existsById(I id) throws RepositoryException;
 
 	T findById(I id) throws RepositoryException;

@@ -369,6 +369,11 @@ public abstract class DBRepository {
 		return PullPage.of(items, newMarker, hasMore);
 	}
 
+	public <T> PullPage<T> findForPullPageByColumn(String sql, Object[] params, String column, PullPageRequest page,
+			DBMapper<T> mapper) {
+		return findForPullPageByColumn(sql, params, column, page.getLimit(), mapper);
+	}
+
 	public int count(String sql, Object[] params) {
 		Integer val = getJdbcTemplate().queryForObject(sql, params, Integer.class);
 		return FormatUtil.parseIntValue(val, 0);

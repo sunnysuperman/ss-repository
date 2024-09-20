@@ -104,6 +104,10 @@ class EntityField {
 		return converter;
 	}
 
+	public String getColumnName() {
+		return columnName;
+	}
+
 	@SuppressWarnings({ "rawtypes", "unchecked" })
 	public Object getColumnValue(Object entity, SerializeContext context) {
 		Object fieldValue = getFieldValue(entity);
@@ -117,6 +121,9 @@ class EntityField {
 		}
 		// 默认转换器
 		if (!relation) {
+			if (context == null) {
+				return fieldValue;
+			}
 			return context.getDefaultFieldConverter().convertToColumn(fieldValue);
 		}
 		// 关联对象

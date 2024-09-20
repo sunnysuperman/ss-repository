@@ -2,6 +2,7 @@ package com.sunnysuperman.repository.db;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedList;
@@ -13,7 +14,6 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.sunnysuperman.commons.util.StringUtil;
-import com.sunnysuperman.repository.FieldValue;
 import com.sunnysuperman.repository.InsertUpdate;
 import com.sunnysuperman.repository.MultiColumn;
 import com.sunnysuperman.repository.RepositoryException;
@@ -33,6 +33,11 @@ class EntityMeta {
 	private String insertSql;
 	private String updateSql;
 	private String emptyUpdateSql;
+	private String deleteByIdSql;
+	private String deleteSql;
+	private String existsByIdSql;
+	private String findByIdSql;
+	private String findAllSql;
 	private Map<String, String> updateSqls = new ConcurrentHashMap<>();
 
 	public EntityField getVersionField() {
@@ -86,6 +91,58 @@ class EntityMeta {
 		});
 		meta.normalFields = Collections.unmodifiableList(new ArrayList<>(meta.normalFields));
 		return meta;
+	}
+
+	public String getIdColumnName() {
+		return idField.columnName;
+	}
+
+	public Class<?> findIdFieldType() {
+		return idField == null ? null : idField.getFieldType();
+	}
+
+	public Class<?> findGeneratedIdFieldType() {
+		if (idInfo == null || idInfo.strategy() != IdStrategy.INCREMENT) {
+			return null;
+		}
+		return findIdFieldType();
+	}
+
+	public Object setEntityId(Object entity, Object id, DefaultFieldConverter defaultFieldConverter) {
+		try {
+			return idField.setFieldValue(entity, id, null, defaultFieldConverter);
+		} catch (RepositoryException ex) {
+			throw ex;
+		} catch (Exception ex) {
+			throw new RepositoryException(ex);
+		}
+	}
+
+	public Object getEntityId(Object entity) {
+		try {
+			return idField.getRelationFieldValue(entity);
+		} catch (RepositoryException ex) {
+			throw ex;
+		} catch (Exception ex) {
+			throw new RepositoryException(ex);
+		}
+	}
+
+	public void setVersionValue(Object entity, Object newVersion) {
+		versionField.setFieldValue(entity, newVersion);
+	}
+
+	public Set<String> getColumnNames(Set<String> fields) {
+		Set<String> columns = new HashSet<>(fields.size());
+		for (EntityField f : normalFields) {
+			if (fields.contains(f.fieldName)) {
+				columns.add(f.columnName);
+			}
+		}
+		if (idField != null && fields.contains(idField.fieldName)) {
+			columns.add(idField.columnName);
+		}
+		return columns;
 	}
 
 	public String getInsertSql(Object entity, DefaultFieldConverter defaultFieldConverter) {
@@ -184,86 +241,71 @@ class EntityMeta {
 		return new SaveParams(paramsBatch, newVersions);
 	}
 
-	public String getIdColumnName() {
-		return idField.columnName;
-	}
-
-	public Class<?> findIdFieldType() {
-		return idField == null ? null : idField.getFieldType();
-	}
-
-	public Class<?> findGeneratedIdFieldType() {
-		if (idInfo == null || idInfo.strategy() != IdStrategy.INCREMENT) {
-			return null;
+	public String getDeleteByIdSql() {
+		if (deleteByIdSql == null) {
+			deleteByIdSql = makDeleteByIdSql().append("=?").toString();
 		}
-		return findIdFieldType();
+		return deleteByIdSql;
 	}
 
-	public Object setEntityId(Object entity, Object id, DefaultFieldConverter defaultFieldConverter) {
-		try {
-			return idField.setFieldValue(entity, id, null, defaultFieldConverter);
-		} catch (RepositoryException ex) {
-			throw ex;
-		} catch (Exception ex) {
-			throw new RepositoryException(ex);
-		}
-	}
-
-	public Object getEntityId(Object entity) {
-		try {
-			return idField.getRelationFieldValue(entity);
-		} catch (RepositoryException ex) {
-			throw ex;
-		} catch (Exception ex) {
-			throw new RepositoryException(ex);
-		}
-	}
-
-	public FieldValue findIdFieldAndValue(Object entity, DefaultFieldConverter defaultFieldConverter) {
-		if (idField == null) {
-			return null;
-		}
-		return makeFieldValue(idField, entity, defaultFieldConverter);
-	}
-
-	public FieldValue getIdFieldAndValue(Object entity, DefaultFieldConverter defaultFieldConverter) {
-		FieldValue fieldValue = findIdFieldAndValue(entity, defaultFieldConverter);
-		if (fieldValue == null) {
-			throw new RepositoryException("No id field");
-		}
-		return fieldValue;
-	}
-
-	public FieldValue findVersionFieldAndValue(Object entity, DefaultFieldConverter defaultFieldConverter) {
-		if (versionField == null) {
-			return null;
-		}
-		return makeFieldValue(versionField, entity, defaultFieldConverter);
-	}
-
-	public FieldValue getVersionFieldAndValue(Object entity, DefaultFieldConverter defaultFieldConverter) {
-		FieldValue fieldValue = findVersionFieldAndValue(entity, defaultFieldConverter);
-		if (fieldValue == null) {
-			throw new RepositoryException("No version field");
-		}
-		return fieldValue;
-	}
-
-	public void setVersionValue(Object entity, Object newVersion) {
-		versionField.setFieldValue(entity, newVersion);
-	}
-
-	public Set<String> getColumnNames(Set<String> fields) {
-		Set<String> columns = new HashSet<>(fields.size());
-		for (EntityField f : normalFields) {
-			if (fields.contains(f.fieldName)) {
-				columns.add(f.columnName);
+	public String getDeleteSql() {
+		if (deleteSql == null) {
+			if (versionField == null) {
+				deleteSql = getDeleteByIdSql();
+			} else {
+				deleteSql = new StringBuilder(getDeleteByIdSql()).append(" and ").append(versionField.getColumnName())
+						.append("=?").toString();
 			}
 		}
-		if (idField != null && fields.contains(idField.fieldName)) {
-			columns.add(idField.columnName);
+		return deleteSql;
+	}
+
+	public SqlAndParams getDeleteByIdSqlAndParams(Collection<?> entityIds) {
+		if (entityIds.size() == 1) {
+			return new SqlAndParams(getDeleteByIdSql(), new Object[] { entityIds.iterator().next() });
 		}
-		return columns;
+		StringBuilder sql = appendInClause(makDeleteByIdSql(), entityIds);
+		return new SqlAndParams(sql.toString(), entityIds.toArray(new Object[entityIds.size()]));
+	}
+
+	public SqlAndParams getDeleteByEntitySqlAndParams(Object entity) {
+		Object[] params = versionField == null ? new Object[] { getEntityId(entity) }
+				: new Object[] { getEntityId(entity), versionField.getColumnValue(entity, null) };
+		return new SqlAndParams(getDeleteSql(), params);
+	}
+
+	public SqlAndBatchParams getDeleteByEntityListSqlAndParams(List<?> entityList) {
+		List<Object[]> batchParams = entityList.stream()
+				.map(i -> versionField == null ? new Object[] { getEntityId(i) }
+						: new Object[] { getEntityId(i), versionField.getColumnValue(i, null) })
+				.collect(Collectors.toList());
+		return new SqlAndBatchParams(getDeleteSql(), batchParams);
+	}
+
+	public String getExistsByIdSql() {
+		if (existsByIdSql == null) {
+			existsByIdSql = new StringBuilder("select 1 from ").append(tableName).append(where())
+					.append(getIdColumnName()).append("=?").toString();
+		}
+		return existsByIdSql;
+	}
+
+	public String getFindByIdSql() {
+		if (findByIdSql == null) {
+			findByIdSql = makeFindByIdSql().append("=?").toString();
+		}
+		return findByIdSql;
+	}
+
+	public String getFindByIdsSql(Collection<?> ids) {
+		return appendInClause(makeFindByIdSql(), ids).toString();
+	}
+
+	public String getFindAllSql() {
+		if (findAllSql == null) {
+			findAllSql = new StringBuilder("select * from ").append(tableName).toString();
+		}
+		return findAllSql;
 	}
 
 	private String makeUpdateSql(Object entity, Set<String> fields, DefaultFieldConverter defaultFieldConverter) {
@@ -290,7 +332,7 @@ class EntityMeta {
 		// 组装SQL
 		StringBuilder b = new StringBuilder("update ").append(tableName).append(" set ");
 		b.append(StringUtil.join(updateColumns.stream().map(i -> i + "=?").collect(Collectors.toList())));
-		b.append(" where ");
+		b.append(where());
 		b.append(StringUtil.join(conditionalColumns.stream().map(i -> i + "=?").collect(Collectors.toList()), " and "));
 		return b.toString();
 	}
@@ -390,14 +432,29 @@ class EntityMeta {
 		});
 	}
 
-	private static FieldValue makeFieldValue(EntityField eField, Object entity,
-			DefaultFieldConverter defaultFieldConverter) {
-		FieldValue fieldValue = new FieldValue();
-		fieldValue.setName(eField.fieldName);
-		fieldValue.setValue(eField.getRelationFieldValue(entity));
-		fieldValue.setColumnName(eField.columnName);
-		fieldValue.setColumnValue(eField.getColumnValue(entity,
-				new DBSerializeContext(entity, null, InsertUpdate.UPSERT, defaultFieldConverter)));
-		return fieldValue;
+	private StringBuilder makeFindByIdSql() {
+		return new StringBuilder("select * from ").append(tableName).append(where()).append(getIdColumnName());
 	}
+
+	private StringBuilder makDeleteByIdSql() {
+		return new StringBuilder("delete from ").append(tableName).append(where()).append(getIdColumnName());
+	}
+
+	private StringBuilder where() {
+		return new StringBuilder(" where ");
+	}
+
+	private static StringBuilder appendInClause(StringBuilder sql, Collection<?> items) {
+		sql.append(" in(");
+		for (int i = 0; i < items.size(); i++) {
+			if (i > 0) {
+				sql.append(",?");
+			} else {
+				sql.append('?');
+			}
+		}
+		sql.append(')');
+		return sql;
+	}
+
 }

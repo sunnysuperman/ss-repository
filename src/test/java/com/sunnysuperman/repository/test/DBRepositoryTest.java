@@ -14,8 +14,12 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.sunnysuperman.commons.util.StringUtil;
@@ -32,6 +36,7 @@ import com.sunnysuperman.repository.db.mapper.LongDBMapper;
 import com.sunnysuperman.repository.exception.StaleEntityRepositoryException;
 
 public class DBRepositoryTest {
+	private static final Logger LOG = LoggerFactory.getLogger(DBRepositoryTest.class);
 	private static DBRepository dbRepository;
 
 	@Entity
@@ -594,6 +599,55 @@ public class DBRepositoryTest {
 	}
 
 	@Test
+	void deleteById() throws Exception {
+		DBCRUDRepository<AutoIncrementIdAwareEntity, Long> repo = getCRUDRepository(AutoIncrementIdAwareEntity.class,
+				Long.class);
+
+		List<AutoIncrementIdAwareEntity> list = IntStream.range(0, 3).mapToObj(i -> {
+			AutoIncrementIdAwareEntity a = new AutoIncrementIdAwareEntity();
+			a.setVal("a" + (i + 1));
+			repo.insert(a);
+			return a;
+		}).collect(Collectors.toList());
+
+		list.forEach(i -> {
+			assertNotNull(repo.findById(i.getId()));
+		});
+
+		List<Long> ids = list.stream().map(AutoIncrementIdAwareEntity::getId).collect(Collectors.toList());
+		assertTrue(repo.deleteById(ids.get(0)));
+
+		assertEquals(ids.size() - 1, repo.deleteByIds(ids));
+		list.forEach(i -> {
+			assertNull(repo.findById(i.getId()));
+		});
+	}
+
+	@Test
+	void deleteVersionAwareById() throws Exception {
+		DBCRUDRepository<IntVerionAwareEntity, Long> repo = getCRUDRepository(IntVerionAwareEntity.class, Long.class);
+
+		List<IntVerionAwareEntity> list = IntStream.range(0, 3).mapToObj(i -> {
+			IntVerionAwareEntity a = new IntVerionAwareEntity();
+			a.setVal("a" + (i + 1));
+			repo.insert(a);
+			return a;
+		}).collect(Collectors.toList());
+
+		list.forEach(i -> {
+			assertNotNull(repo.findById(i.getId()));
+		});
+
+		List<Long> ids = list.stream().map(IntVerionAwareEntity::getId).collect(Collectors.toList());
+		assertTrue(repo.deleteById(ids.get(0)));
+
+		assertEquals(ids.size() - 1, repo.deleteByIds(ids));
+		list.forEach(i -> {
+			assertNull(repo.findById(i.getId()));
+		});
+	}
+
+	@Test
 	void delete() throws Exception {
 		DBCRUDRepository<AutoIncrementIdAwareEntity, Long> repo = getCRUDRepository(AutoIncrementIdAwareEntity.class,
 				Long.class);
@@ -614,7 +668,7 @@ public class DBRepositoryTest {
 	}
 
 	@Test
-	void deleteVersionAwareEntity() throws Exception {
+	void deleteVersionAware() throws Exception {
 		DBCRUDRepository<IntVerionAwareEntity, Long> repo = getCRUDRepository(IntVerionAwareEntity.class, Long.class);
 
 		IntVerionAwareEntity a1 = new IntVerionAwareEntity();
@@ -631,10 +685,84 @@ public class DBRepositoryTest {
 			repo.delete(a1);
 			assertTrue(false);
 		} catch (StaleEntityRepositoryException e) {
-			e.printStackTrace();
+			LOG.info(e.getMessage());
+			assertTrue(e.getMessage().contains(a1.getId().toString()));
 		}
 
 		assertTrue(repo.delete(a2));
+	}
+
+	@Test
+	void deleteBatch() throws Exception {
+		DBCRUDRepository<AutoIncrementIdAwareEntity, Long> repo = getCRUDRepository(AutoIncrementIdAwareEntity.class,
+				Long.class);
+
+		List<AutoIncrementIdAwareEntity> list = IntStream.range(0, 3).mapToObj(i -> {
+			AutoIncrementIdAwareEntity a = new AutoIncrementIdAwareEntity();
+			a.setVal("a" + (i + 1));
+			repo.insert(a);
+			return a;
+		}).collect(Collectors.toList());
+
+		list.forEach(i -> {
+			assertNotNull(repo.findById(i.getId()));
+		});
+
+		AutoIncrementIdAwareEntity a1Updated = repo.findById(list.get(0).getId());
+		a1Updated.setVal("a1-updated");
+		repo.update(a1Updated);
+
+		assertTrue(repo.deleteBatch(Arrays.asList(a1Updated, list.get(1))));
+
+		assertNull(repo.findById(list.get(0).getId()));
+		assertNull(repo.findById(list.get(1).getId()));
+		assertNotNull(repo.findById(list.get(2).getId()));
+
+		assertFalse(repo.deleteBatch(Arrays.asList(a1Updated, list.get(1))));
+	}
+
+	@Test
+	void deleteBatchVerionAware() throws Exception {
+		DBCRUDRepository<IntVerionAwareEntity, Long> repo = getCRUDRepository(IntVerionAwareEntity.class, Long.class);
+
+		IntVerionAwareEntity a1 = new IntVerionAwareEntity();
+		a1.setVal("a1");
+		repo.insert(a1);
+		assertNotNull(a1.getId());
+
+		IntVerionAwareEntity a1Updated = repo.findById(a1.getId());
+		a1Updated.setVal("a2");
+		repo.update(a1Updated);
+		assertEquals(a1Updated.getId(), a1.getId());
+
+		try {
+			repo.delete(a1);
+			assertTrue(false);
+		} catch (StaleEntityRepositoryException e) {
+			LOG.info(e.getMessage());
+			assertTrue(e.getMessage().contains(a1.getId().toString()));
+		}
+
+		IntVerionAwareEntity a2 = new IntVerionAwareEntity();
+		a2.setVal("a2");
+		repo.insert(a2);
+
+		try {
+			repo.deleteBatch(Arrays.asList(a1, a2));
+			assertTrue(false);
+		} catch (StaleEntityRepositoryException e) {
+			LOG.info(e.getMessage());
+			assertTrue(e.getMessage().contains(a1.getId().toString()));
+			assertFalse(e.getMessage().contains(a2.getId().toString()));
+		}
+
+		IntVerionAwareEntity a3 = new IntVerionAwareEntity();
+		a3.setVal("a3");
+		repo.insert(a3);
+
+		repo.deleteBatch(Arrays.asList(a1Updated, a3));
+		assertNull(repo.findById(a1Updated.getId()));
+		assertNull(repo.findById(a3.getId()));
 	}
 
 	@Test
